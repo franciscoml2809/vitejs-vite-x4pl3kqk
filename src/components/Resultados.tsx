@@ -57,6 +57,8 @@ setCalculando(true);
 setMensaje("");
 try {
 // 1. Guardar resultados reales en cada partido
+console.log("partidos:", partidos.map((p:any) => p.id));
+console.log("resultados keys:", Object.keys(resultados));
 for (const partido of partidos) {
 const r = resultados[partido.id];
 if (r.local === "" || r.visitante === "") continue;
@@ -95,27 +97,24 @@ puntajesPorUsuario[pro.uid] += puntos;
 
 // 4. Actualizar tabla de puntos global
 for (const [uid, puntos] of Object.entries(puntajesPorUsuario)) {
-const tablaRef = doc(db, "tabla", uid);
-const tablaSnap = await getDocs(
-query(collection(db, "tabla"), where("uid", "==", uid))
-);
-if (tablaSnap.empty) {
-const { setDoc } = await import("firebase/firestore");
-await setDoc(tablaRef, {
-uid,
-totalPuntos: puntos,
-jornadas: { [jornada.id]: puntos }
-});
-} else {
-const tablaDoc = tablaSnap.docs[0];
-const data = tablaDoc.data();
-const puntosAnteriores = data.jornadas?.[jornada.id] || 0;
-await updateDoc(doc(db, "tabla", tablaDoc.id), {
-totalPuntos: (data.totalPuntos || 0) - puntosAnteriores + puntos,
-['jornadas.'+jornada.id]: puntos
-});
-}
-}
+    const tablaRef = doc(db, "tabla", uid);
+    const { getDoc, setDoc } = await import("firebase/firestore");
+    const tablaSnap = await getDoc(tablaRef);
+    if (!tablaSnap.exists()) {
+    await setDoc(tablaRef, {
+    uid,
+    totalPuntos: puntos,
+    jornadas: { [jornada.id]: puntos }
+    });
+    } else {
+    const data = tablaSnap.data();
+    const puntosAnteriores = data.jornadas?.[jornada.id] || 0;
+    await updateDoc(tablaRef, {
+    totalPuntos: (data.totalPuntos || 0) - puntosAnteriores + puntos,
+    ['jornadas.' + jornada.id]: puntos
+    });
+    }
+    }
 
 // 5. Cerrar la jornada
 //await updateDoc(doc(db, "jornadas", jornada.id), { estado: "cerrada" });

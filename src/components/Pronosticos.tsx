@@ -29,7 +29,7 @@ useEffect(() => {
   
   const iniciales: any = {};
   for (const partido of lista) {
-  const ref = doc(db, "pronosticos", '${user.uid}_${partido.id}');
+  const ref = doc(db, "pronosticos", user.uid + "_" + partido.id);
   const proSnap = await getDoc(ref);
   if (proSnap.exists()) {
   const data = proSnap.data();
@@ -59,10 +59,11 @@ const guardar = async () => {
 setGuardando(true);
 setMensaje("");
 try {
+console.log("pronosticos state:", JSON.stringify(pronosticos));
 for (const partido of partidos) {
 const p = pronosticos[partido.id];
 if (p.local === "" || p.visitante === "") continue;
-await setDoc(doc(db, "pronosticos", '${user.uid}_${partido.id}'), {
+await setDoc(doc(db, "pronosticos", user.uid + "_" + partido.id), {
 uid: user.uid,
 jornadaId: jornada.id,
 partidoId: partido.id,
@@ -84,6 +85,8 @@ Cargando partidos...
 </div>
 );
 
+console.log("partidos ids:", partidos.map((p:any) => p.id));
+console.log("pronosticos keys:", Object.keys(pronosticos));
 return (
 <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
 
@@ -118,7 +121,11 @@ padding: "20px", textAlign: "center", color: "#888"
 </div>
 ) : (
 <>
-{partidos.map((partido) => (
+{partidos.map((partido) => {
+const proLocal = pronosticos[partido.id] ? pronosticos[partido.id].local : "";
+const proVisitante = pronosticos[partido.id] ? pronosticos[partido.id].visitante : "";
+
+return (
 <div key={partido.id} style={{
 backgroundColor: "#16213e", borderRadius: "12px",
 padding: "16px", marginBottom: "12px", border: "1px solid #333"
@@ -135,10 +142,11 @@ alignItems: "center", gap: "10px"
 {partido.local}
 </div>
 <input
+key={partido.id + "_local"}
 type="number"
 min="0"
 placeholder="0"
-value={pronosticos[partido.id]?.local || ""}
+value={proLocal}
 onChange={(e) => handleChange(partido.id, "local", e.target.value)}
 style={golesInput}
 />
@@ -151,17 +159,19 @@ VS
 {partido.visitante}
 </div>
 <input
+key={partido.id + "_visitante"}
 type="number"
 min="0"
 placeholder="0"
-value={pronosticos[partido.id]?.visitante || ""}
+value={proVisitante}
 onChange={(e) => handleChange(partido.id, "visitante", e.target.value)}
 style={golesInput}
 />
 </div>
 </div>
 </div>
-))}
+);
+})}
 
 {mensaje && (
 <p style={{ color: mensaje.includes("✅") ? "#4caf50" : "#e94560", textAlign: "center" }}>

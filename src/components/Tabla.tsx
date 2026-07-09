@@ -60,7 +60,7 @@ border: index === 0 ? "1px solid #e94560" : "1px solid #333",
 display: "flex", alignItems: "center", gap: "14px"
 }}>
 <div style={{ fontSize: "24px", minWidth: "32px", textAlign: "center" }}>
-{medallas[index] || '${index + 1}'}
+{medallas[index] || (index +1)}
 </div>
 <div style={{ flex: 1 }}>
 <div style={{ fontWeight: "bold", fontSize: "15px" }}>
