@@ -311,7 +311,7 @@ padding: "4px 10px", borderRadius: "20px", fontSize: "12px"
   </button>
   <button
   onClick={() => {
-    const baseUrl = "https://vitejsvitex4pl3kqk-dmlm--5173--639e0ff1.local-credentialless.webcontainer.io";
+    const baseUrl =  "https://6a4fc9731fe53d00d2fc4090--loquacious-nasturtium-d7304d.netlify.app";
     const url = baseUrl + "/jornada/" + j.id;
     const texto = "Llena tu quiniela! Jornada " + j.numero + " de Liga MX " + url;
     const waUrl = "https://wa.me/?text=" + encodeURIComponent(texto);
