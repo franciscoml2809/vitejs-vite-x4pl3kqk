@@ -159,7 +159,7 @@ style={inputStyle}
 );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+// @ts-ignore
 function PartidosAdmin({ user }: { user: User }) {
   const [jornadas, setJornadas] = useState<any[]>([]);
   const [jornadaSeleccionada, setJornadaSeleccionada] = useState("");
