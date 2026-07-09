@@ -24,7 +24,7 @@ limite.setDate(limite.getDate() + 2);
 
 let jornadaDefault = listaJornadas[0];
 for (const j of listaJornadas) {
-const fechaFin = new Date(j.fechaFin);
+const fechaFin = new Date((j as any).fechaFin);
 if (fechaFin >= hoy || fechaFin <= limite) {
 jornadaDefault = j;
 break;
