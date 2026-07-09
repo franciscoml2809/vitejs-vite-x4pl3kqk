@@ -40,7 +40,7 @@ const crearJornada = async () => {
   fechaInicio: fechaInicio,
   fechaFin: fechaFin,
   estado: "abierta",
-  creadoPor: user.uid,
+  creadoPor: _props.user.uid,
   creadoEn: Timestamp.now()
   });
   setMensaje("✅ Jornada creada exitosamente");
@@ -159,7 +159,7 @@ style={inputStyle}
 );
 }
 
-function PartidosAdmin({ user }: { user: User }) {
+function PartidosAdmin(_props: { user: User }) {
   const [jornadas, setJornadas] = useState<any[]>([]);
   const [jornadaSeleccionada, setJornadaSeleccionada] = useState("");
   const [local, setLocal] = useState("");
