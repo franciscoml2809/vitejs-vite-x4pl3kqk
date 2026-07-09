@@ -28,13 +28,15 @@ const proSnap = await getDocs(
 query(
 collection(db, "pronosticos"),
 where("uid", "==", user.uid),
-where("jornadaId", "==", jornada.id)
 )
 );
 
+const misPronos = proSnap.docs
+.map(d => ({ id: d.id, ...d.data() }))
+.filter((p:any) => p.jornadaId === jornada.id);
+
 let total = 0;
-const lista = proSnap.docs.map(d => {
-const pro = d.data();
+const lista = misPronos.map((pro: any) => {
 const partido = partidos[pro.partidoId];
 total += pro.puntos || 0;
 return { ...pro, partido };

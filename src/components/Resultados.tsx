@@ -109,8 +109,9 @@ jornadas: { [jornada.id]: puntos }
 } else {
 const tablaDoc = tablaSnap.docs[0];
 const data = tablaDoc.data();
+const puntosAnteriores = data.jornadas?.[jornada.id] || 0;
 await updateDoc(doc(db, "tabla", tablaDoc.id), {
-totalPuntos: (data.totalPuntos || 0) + puntos,
+totalPuntos: (data.totalPuntos || 0) - puntosAnteriores + puntos,
 ['jornadas.'+jornada.id]: puntos
 });
 }
