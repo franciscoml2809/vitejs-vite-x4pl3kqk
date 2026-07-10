@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, orderBy, query, doc, getDoc } from "firebase/firestore";
 
 export default function Tabla() {
 const [jornadas, setJornadas] = useState<any[]>([]);
@@ -8,6 +8,7 @@ const [jornadaSeleccionada, setJornadaSeleccionada] = useState<any>(null);
 const [tabla, setTabla] = useState<any[]>([]);
 const [usuarios, setUsuarios] = useState<{ [uid: string]: string }>({});
 const [loading, setLoading] = useState(true);
+const [loadingTabla, setLoadingTabla] = useState(false);
 
 useEffect(() => {
 const cargar = async () => {
@@ -19,13 +20,12 @@ setJornadas(listaJornadas);
 
 // Seleccionar jornada predeterminada
 const hoy = new Date();
-const limite = new Date();
-limite.setDate(limite.getDate() + 2);
-
 let jornadaDefault = listaJornadas[0];
 for (const j of listaJornadas) {
 const fechaFin = new Date((j as any).fechaFin);
-if (fechaFin >= hoy || fechaFin <= limite) {
+const dosDispuesDelFin = new Date(fechaFin);
+dosDispuesDelFin.setDate(dosDispuesDelFin.getDate() + 2);
+if (hoy <= dosDispuesDelFin) {
 jornadaDefault = j;
 break;
 }
@@ -47,27 +47,23 @@ cargar();
 
 useEffect(() => {
 if (!jornadaSeleccionada) return;
-cargarTablaJornada(jornadaSeleccionada.id);
+cargarTabla(jornadaSeleccionada.id);
 }, [jornadaSeleccionada]);
 
-const cargarTablaJornada = async (jornadaId: string) => {
-const proSnap = await getDocs(
-query(collection(db, "pronosticos"))
+const cargarTabla = async (jornadaId: string) => {
+setLoadingTabla(true);
+try {
+const posicionesSnap = await getDocs(
+collection(db, "tablaPorJornada", jornadaId, "posiciones")
 );
-
-const puntajesPorUsuario: { [uid: string]: number } = {};
-proSnap.docs.forEach(d => {
-const pro = d.data();
-if (pro.jornadaId !== jornadaId) return;
-if (!puntajesPorUsuario[pro.uid]) puntajesPorUsuario[pro.uid] = 0;
-puntajesPorUsuario[pro.uid] += pro.puntos || 0;
-});
-
-const listaTabla = Object.entries(puntajesPorUsuario)
-.map(([uid, puntos]) => ({ uid, puntos }))
-.sort((a, b) => b.puntos - a.puntos);
-
-setTabla(listaTabla);
+const lista = posicionesSnap.docs
+.map(d => ({ uid: d.id, ...d.data() }))
+.sort((a: any, b: any) => b.totalPuntos - a.totalPuntos);
+setTabla(lista);
+} catch (e) {
+setTabla([]);
+}
+setLoadingTabla(false);
 };
 
 if (loading) return (
@@ -82,18 +78,16 @@ return (
 <div>
 <h2 style={{ color: "#e94560", marginTop: 0 }}>Tabla de posiciones</h2>
 
-{/* Selector de jornada */}
 <select
 value={jornadaSeleccionada?.id || ""}
 onChange={(e) => {
-const j = jornadas.find(j => j.id === e.target.value);
+const j = jornadas.find((j: any) => j.id === e.target.value);
 setJornadaSeleccionada(j);
 }}
 style={{
 width: "100%", padding: "12px", marginBottom: "16px",
 borderRadius: "8px", border: "1px solid #333",
-backgroundColor: "#0f3460", color: "#fff",
-fontSize: "15px"
+backgroundColor: "#0f3460", color: "#fff", fontSize: "15px"
 }}
 >
 {jornadas.map((j: any) => (
@@ -103,7 +97,11 @@ Jornada {j.numero} — {j.fechaInicio} al {j.fechaFin}
 ))}
 </select>
 
-{tabla.length === 0 ? (
+{loadingTabla ? (
+<div style={{ textAlign: "center", color: "#888", padding: "20px" }}>
+Cargando tabla...
+</div>
+) : tabla.length === 0 ? (
 <div style={{
 backgroundColor: "#16213e", borderRadius: "12px",
 padding: "20px", textAlign: "center", color: "#888"
@@ -135,7 +133,7 @@ Jornada {jornadaSeleccionada?.numero}
 fontSize: "22px", fontWeight: "bold",
 color: index === 0 ? "#e94560" : "#fff"
 }}>
-{entry.puntos}
+{entry.totalPuntos}
 </div>
 <div style={{ color: "#888", fontSize: "11px" }}>pts</div>
 </div>

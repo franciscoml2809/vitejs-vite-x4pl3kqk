@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import {
-collection, getDocs, doc, setDoc, getDoc
-} from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
 import type { User } from "firebase/auth";
 
 interface Props {
@@ -18,34 +16,46 @@ const [loading, setLoading] = useState(true);
 const [guardando, setGuardando] = useState(false);
 const [mensaje, setMensaje] = useState("");
 
-
 useEffect(() => {
-  const cargar = async () => {
-  const partidosSnap = await getDocs(
-  collection(db, "jornadas", jornada.id, "partidos")
-  );
-  const lista = partidosSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-  setPartidos(lista);
-  
-  const iniciales: any = {};
-  for (const partido of lista) {
-  const ref = doc(db, "pronosticos", user.uid + "_" + partido.id);
-  const proSnap = await getDoc(ref);
-  if (proSnap.exists()) {
-  const data = proSnap.data();
-  iniciales[partido.id] = {
-  local: String(data.golesLocal),
-  visitante: String(data.golesVisitante)
-  };
-  } else {
-  iniciales[partido.id] = { local: "", visitante: "" };
-  }
-  }
-  setPronosticos(iniciales);
-  setLoading(false);
-  };
-  cargar();
-  }, []);
+const cargar = async () => {
+// Cargar partidos activos (no suspendidos)
+const partidosSnap = await getDocs(
+collection(db, "jornadas", jornada.id, "partidos")
+);
+const lista = partidosSnap.docs
+.map(d => ({ id: d.id, ...d.data() }))
+.filter((p: any) => !p.suspendido);
+setPartidos(lista);
+
+// Cargar pronósticos existentes
+const iniciales: any = {};
+for (const partido of lista) {
+const ahora = new Date();
+const fechaPartido = new Date(partido.fechaHora);
+const unaHoraAntes = new Date(fechaPartido.getTime() - 60 * 60 * 1000);
+
+if (ahora >= unaHoraAntes) {
+iniciales[partido.id] = { local: "🔒", visitante: "🔒", bloqueado: true };
+continue;
+}
+
+const ref = doc(db, "pronosticos", jornada.id, "participantes", user.uid, "partidos", partido.id);
+const proSnap = await getDoc(ref);
+if (proSnap.exists()) {
+const data = proSnap.data();
+iniciales[partido.id] = {
+local: String(data.golesLocal),
+visitante: String(data.golesVisitante)
+};
+} else {
+iniciales[partido.id] = { local: "", visitante: "" };
+}
+}
+setPronosticos(iniciales);
+setLoading(false);
+};
+cargar();
+}, []);
 
 const handleChange = (partidoId: string, tipo: "local" | "visitante", valor: string) => {
 if (valor !== "" && (isNaN(Number(valor)) || Number(valor) < 0)) return;
@@ -59,18 +69,26 @@ const guardar = async () => {
 setGuardando(true);
 setMensaje("");
 try {
-console.log("pronosticos state:", JSON.stringify(pronosticos));
 for (const partido of partidos) {
 const p = pronosticos[partido.id];
-if (p.local === "" || p.visitante === "") continue;
-await setDoc(doc(db, "pronosticos", user.uid + "_" + partido.id), {
-uid: user.uid,
-jornadaId: jornada.id,
-partidoId: partido.id,
+if (!p || p.local === "" || p.visitante === "" || (p as any).bloqueado) continue;
+
+const ahora = new Date();
+const fechaPartido = new Date(partido.fechaHora);
+const unaHoraAntes = new Date(fechaPartido.getTime() - 60 * 60 * 1000);
+if (ahora >= unaHoraAntes) continue;
+
+await setDoc(
+doc(db, "pronosticos", jornada.id, "participantes", user.uid, "partidos", partido.id),
+{
 golesLocal: parseInt(p.local),
 golesVisitante: parseInt(p.visitante),
-puntos: 0
-});
+puntos: 0,
+uid: user.uid,
+jornadaId: jornada.id,
+partidoId: partido.id
+}
+);
 }
 setMensaje("✅ Pronósticos guardados");
 } catch (e) {
@@ -85,12 +103,8 @@ Cargando partidos...
 </div>
 );
 
-console.log("partidos ids:", partidos.map((p:any) => p.id));
-console.log("pronosticos keys:", Object.keys(pronosticos));
 return (
 <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
-
-{/* Header */}
 <div style={{
 backgroundColor: "#16213e", padding: "16px 20px",
 display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -117,21 +131,28 @@ cursor: "pointer", fontSize: "13px"
 backgroundColor: "#16213e", borderRadius: "12px",
 padding: "20px", textAlign: "center", color: "#888"
 }}>
-<p>No hay partidos en esta jornada aún.</p>
+<p>No hay partidos disponibles en esta jornada.</p>
 </div>
 ) : (
 <>
 {partidos.map((partido) => {
-const proLocal = pronosticos[partido.id] ? pronosticos[partido.id].local : "";
-const proVisitante = pronosticos[partido.id] ? pronosticos[partido.id].visitante : "";
+const pro = pronosticos[partido.id];
+const bloqueado = (pro as any)?.bloqueado;
 
 return (
 <div key={partido.id} style={{
 backgroundColor: "#16213e", borderRadius: "12px",
-padding: "16px", marginBottom: "12px", border: "1px solid #333"
+padding: "16px", marginBottom: "12px",
+border: bloqueado ? "1px solid #555" : "1px solid #333",
+opacity: bloqueado ? 0.7 : 1
 }}>
 <div style={{ fontSize: "12px", color: "#888", marginBottom: "10px" }}>
 {partido.fechaHora}
+{bloqueado && (
+<span style={{ color: "#e94560", marginLeft: "8px" }}>
+🔒 Pronóstico cerrado
+</span>
+)}
 </div>
 <div style={{
 display: "grid", gridTemplateColumns: "1fr auto 1fr",
@@ -142,13 +163,13 @@ alignItems: "center", gap: "10px"
 {partido.local}
 </div>
 <input
-key={partido.id + "_local"}
 type="number"
 min="0"
 placeholder="0"
-value={proLocal}
+disabled={bloqueado}
+value={bloqueado ? "" : (pro?.local || "")}
 onChange={(e) => handleChange(partido.id, "local", e.target.value)}
-style={golesInput}
+style={{ ...golesInput, opacity: bloqueado ? 0.5 : 1 }}
 />
 </div>
 <div style={{ color: "#e94560", fontWeight: "bold", fontSize: "18px" }}>
@@ -159,13 +180,13 @@ VS
 {partido.visitante}
 </div>
 <input
-key={partido.id + "_visitante"}
 type="number"
 min="0"
 placeholder="0"
-value={proVisitante}
+disabled={bloqueado}
+value={bloqueado ? "" : (pro?.visitante || "")}
 onChange={(e) => handleChange(partido.id, "visitante", e.target.value)}
-style={golesInput}
+style={{ ...golesInput, opacity: bloqueado ? 0.5 : 1 }}
 />
 </div>
 </div>

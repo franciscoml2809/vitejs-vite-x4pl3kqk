@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import type { User } from "firebase/auth";
 
 interface Props {
@@ -16,6 +16,7 @@ const [totalPuntos, setTotalPuntos] = useState(0);
 
 useEffect(() => {
 const cargar = async () => {
+// Cargar partidos de la jornada
 const partidosSnap = await getDocs(
 collection(db, "jornadas", jornada.id, "partidos")
 );
@@ -24,23 +25,20 @@ partidosSnap.docs.forEach(d => {
 partidos[d.id] = { id: d.id, ...d.data() };
 });
 
+// Cargar pronósticos del usuario en esta jornada
 const proSnap = await getDocs(
-query(
-collection(db, "pronosticos"),
-where("uid", "==", user.uid),
-)
+collection(db, "pronosticos", jornada.id, "participantes", user.uid, "partidos")
 );
 
-const misPronos = proSnap.docs
-.map(d => ({ id: d.id, ...d.data() }))
-.filter((p:any) => p.jornadaId === jornada.id);
-
 let total = 0;
-const lista = misPronos.map((pro: any) => {
+const lista = proSnap.docs.map(d => {
+const pro = d.data();
 const partido = partidos[pro.partidoId];
+// No contar partidos suspendidos
+if (partido?.suspendido) return null;
 total += pro.puntos || 0;
 return { ...pro, partido };
-});
+}).filter(Boolean);
 
 setDatos(lista);
 setTotalPuntos(total);
@@ -70,7 +68,6 @@ Cargando...
 return (
 <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
 
-{/* Header */}
 <div style={{
 backgroundColor: "#16213e", padding: "16px 20px",
 display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -127,7 +124,15 @@ padding: "20px", marginBottom: "16px", textAlign: "center"
 </div>
 
 {/* Detalle por partido */}
-{datos.map((item, index) => (
+{datos.length === 0 ? (
+<div style={{
+backgroundColor: "#16213e", borderRadius: "12px",
+padding: "20px", textAlign: "center", color: "#888"
+}}>
+<p>No llenaste pronósticos en esta jornada.</p>
+</div>
+) : (
+datos.map((item, index) => (
 <div key={index} style={{
 backgroundColor: "#16213e", borderRadius: "12px",
 padding: "16px", marginBottom: "10px",
@@ -152,29 +157,25 @@ display: "grid", gridTemplateColumns: "1fr auto 1fr",
 gap: "8px", alignItems: "center"
 }}>
 <div style={{ textAlign: "center" }}>
-<div style={{ fontSize: "11px", color: "#888", marginBottom: "4px" }}>Tu pronóstico</div>
+<div style={{ fontSize: "11px", color: "#888", marginBottom: "4px" }}>
+Tu pronóstico
+</div>
 <div style={{ fontWeight: "bold", fontSize: "18px" }}>
 {item.golesLocal} - {item.golesVisitante}
 </div>
 </div>
 <div style={{ color: "#555", fontSize: "12px" }}>vs</div>
 <div style={{ textAlign: "center" }}>
-<div style={{ fontSize: "11px", color: "#888", marginBottom: "4px" }}>Resultado real</div>
+<div style={{ fontSize: "11px", color: "#888", marginBottom: "4px" }}>
+Resultado real
+</div>
 <div style={{ fontWeight: "bold", fontSize: "18px", color: getColor(item.puntos) }}>
 {item.partido?.golesLocal ?? "?"} - {item.partido?.golesVisitante ?? "?"}
 </div>
 </div>
 </div>
 </div>
-))}
-
-{datos.length === 0 && (
-<div style={{
-backgroundColor: "#16213e", borderRadius: "12px",
-padding: "20px", textAlign: "center", color: "#888"
-}}>
-<p>No llenaste pronósticos en esta jornada.</p>
-</div>
+))
 )}
 </div>
 </div>

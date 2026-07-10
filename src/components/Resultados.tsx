@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-collection, getDocs, doc, updateDoc, query, where
+collection, getDocs, doc, updateDoc, setDoc, getDoc
 } from "firebase/firestore";
 
 interface Props {
@@ -21,14 +21,17 @@ const cargar = async () => {
 const snap = await getDocs(
 collection(db, "jornadas", jornada.id, "partidos")
 );
-const lista = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+// Solo partidos NO suspendidos
+const lista = snap.docs
+.map(d => ({ id: d.id, ...d.data() }))
+.filter((p: any) => !p.suspendido);
 setPartidos(lista);
 
 const iniciales: any = {};
 lista.forEach((p: any) => {
 iniciales[p.id] = {
-local: p.golesLocal !== null ? String(p.golesLocal) : "",
-visitante: p.golesVisitante !== null ? String(p.golesVisitante) : ""
+local: p.golesLocal !== null && p.golesLocal !== undefined ? String(p.golesLocal) : "",
+visitante: p.golesVisitante !== null && p.golesVisitante !== undefined ? String(p.golesVisitante) : ""
 };
 });
 setResultados(iniciales);
@@ -57,11 +60,9 @@ setCalculando(true);
 setMensaje("");
 try {
 // 1. Guardar resultados reales en cada partido
-console.log("partidos:", partidos.map((p:any) => p.id));
-console.log("resultados keys:", Object.keys(resultados));
 for (const partido of partidos) {
 const r = resultados[partido.id];
-if (r.local === "" || r.visitante === "") continue;
+if (!r || r.local === "" || r.visitante === "") continue;
 const golesL = parseInt(r.local);
 const golesV = parseInt(r.visitante);
 await updateDoc(doc(db, "jornadas", jornada.id, "partidos", partido.id), {
@@ -71,53 +72,58 @@ resultado: getResultado(golesL, golesV)
 });
 }
 
-// 2. Obtener todos los pronósticos de esta jornada
-const proSnap = await getDocs(
-query(collection(db, "pronosticos"), where("jornadaId", "==", jornada.id))
-);
-
-// 3. Calcular y actualizar puntos por pronóstico
+// 2. Obtener participantes desde colección usuarios
+const usuariosSnap = await getDocs(collection(db, "usuarios"));
 const puntajesPorUsuario: { [uid: string]: number } = {};
 
-for (const proDoc of proSnap.docs) {
+// 3. Por cada usuario calcular sus puntos
+for (const usuarioDoc of usuariosSnap.docs) {
+const uid = usuarioDoc.id;
+
+const partidosSnap = await getDocs(
+collection(db, "pronosticos", jornada.id, "participantes", uid, "partidos")
+);
+
+if (partidosSnap.empty) continue;
+
+let totalUsuario = 0;
+
+for (const proDoc of partidosSnap.docs) {
 const pro = proDoc.data();
-const r = resultados[pro.partidoId];
+const partidoId = proDoc.id;
+const r = resultados[partidoId];
+
+console.log("partidoId:", partidoId, "resultado:", r, "pronostico:", pro);
+
 if (!r || r.local === "" || r.visitante === "") continue;
+
+const partidoRef = doc(db, "jornadas", jornada.id, "partidos", partidoId);
+const partidoSnap = await getDoc(partidoRef);
+if (!partidoSnap.exists() || partidoSnap.data().suspendido) continue;
 
 const puntos = calcularPuntos(
 pro.golesLocal, pro.golesVisitante,
 parseInt(r.local), parseInt(r.visitante)
 );
 
-await updateDoc(doc(db, "pronosticos", proDoc.id), { puntos });
+await updateDoc(
+doc(db, "pronosticos", jornada.id, "participantes", uid, "partidos", partidoId),
+{ puntos }
+);
 
-if (!puntajesPorUsuario[pro.uid]) puntajesPorUsuario[pro.uid] = 0;
-puntajesPorUsuario[pro.uid] += puntos;
+totalUsuario += puntos;
 }
 
-// 4. Actualizar tabla de puntos global
-for (const [uid, puntos] of Object.entries(puntajesPorUsuario)) {
-    const tablaRef = doc(db, "tabla", uid);
-    const { getDoc, setDoc } = await import("firebase/firestore");
-    const tablaSnap = await getDoc(tablaRef);
-    if (!tablaSnap.exists()) {
-    await setDoc(tablaRef, {
-    uid,
-    totalPuntos: puntos,
-    jornadas: { [jornada.id]: puntos }
-    });
-    } else {
-    const data = tablaSnap.data();
-    const puntosAnteriores = data.jornadas?.[jornada.id] || 0;
-    await updateDoc(tablaRef, {
-    totalPuntos: (data.totalPuntos || 0) - puntosAnteriores + puntos,
-    ['jornadas.' + jornada.id]: puntos
-    });
-    }
-    }
+puntajesPorUsuario[uid] = totalUsuario;
+}
 
-// 5. Cerrar la jornada
-//await updateDoc(doc(db, "jornadas", jornada.id), { estado: "cerrada" });
+// 4. Actualizar tabla por jornada
+for (const [uid, puntos] of Object.entries(puntajesPorUsuario)) {
+await setDoc(
+doc(db, "tablaPorJornada", jornada.id, "posiciones", uid),
+{ uid, totalPuntos: puntos }
+);
+}
 
 setMensaje("✅ Resultados guardados y puntos calculados");
 } catch (e) {
@@ -137,7 +143,6 @@ setMensaje("❌ Error al cambiar estado");
 }
 };
 
-
 if (loading) return (
 <div style={{ textAlign: "center", color: "#888", padding: "40px" }}>
 Cargando partidos...
@@ -146,8 +151,6 @@ Cargando partidos...
 
 return (
 <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
-
-{/* Header */}
 <div style={{
 backgroundColor: "#16213e", padding: "16px 20px",
 display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -169,6 +172,15 @@ cursor: "pointer", fontSize: "13px"
 </div>
 
 <div style={{ padding: "20px" }}>
+{partidos.length === 0 ? (
+<div style={{
+backgroundColor: "#16213e", borderRadius: "12px",
+padding: "20px", textAlign: "center", color: "#888"
+}}>
+<p>No hay partidos activos en esta jornada.</p>
+</div>
+) : (
+<>
 {partidos.map((partido) => (
 <div key={partido.id} style={{
 backgroundColor: "#16213e", borderRadius: "12px",
@@ -219,12 +231,11 @@ style={golesInput}
 </div>
 </div>
 ))}
+</>
+)}
 
 {mensaje && (
-<p style={{
-color: mensaje.includes("✅") ? "#4caf50" : "#e94560",
-textAlign: "center", fontSize: "14px"
-}}>
+<p style={{ color: mensaje.includes("✅") ? "#4caf50" : "#e94560", textAlign: "center" }}>
 {mensaje}
 </p>
 )}
@@ -254,7 +265,6 @@ marginTop: "8px"
 >
 {jornada.estado === "abierta" ? "🔒 Cerrar jornada" : "🔓 Reabrir jornada"}
 </button>
-
 </div>
 </div>
 );
