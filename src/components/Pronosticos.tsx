@@ -31,7 +31,7 @@ setPartidos(lista);
 const iniciales: any = {};
 for (const partido of lista) {
 const ahora = new Date();
-const fechaPartido = new Date(partido.fechaHora);
+const fechaPartido = new Date((partido as any).fechaHora);
 const unaHoraAntes = new Date(fechaPartido.getTime() - 60 * 60 * 1000);
 
 if (ahora >= unaHoraAntes) {

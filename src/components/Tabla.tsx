@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, orderBy, query, doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore";
 
 export default function Tabla() {
 const [jornadas, setJornadas] = useState<any[]>([]);
