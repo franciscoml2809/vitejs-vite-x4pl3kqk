@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
   collection, addDoc, getDocs, doc, deleteDoc,
-  updateDoc, orderBy, query, Timestamp
+  updateDoc, orderBy, query, Timestamp, setDoc
 } from "firebase/firestore";
 import type { User } from "firebase/auth";
 import Resultados from "./Resultados";
@@ -34,13 +34,16 @@ export default function Admin({ user, onBack }: Props) {
   const [jornadas, setJornadas] = useState<any[]>([]);
   const [jornadaResultados, setJornadaResultados] = useState<any>(null);
   const [jornadaPartidos, setJornadaPartidos] = useState<any>(null);
+  
+  // ESTADO NUEVO: Controla la apertura de la vista reactiva de participantes por jornada
+  const [jornadaParticipantes, setJornadaParticipantes] = useState<any>(null);
+
   const [numeroJornada, setNumeroJornada] = useState("");
   const [fechaInicio, setFechaInicio] = useState("");
   const [fechaFin, setFechaFin] = useState("");
   const [mensaje, setMensaje] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // --- NUEVA ARQUITECTURA DE ESTADOS DE CONFIGURACIÓN ---
   const [ligas, setLigas] = useState<any[]>([]);
   const [nombreLiga, setNombreLiga] = useState("");
   const [ligaSeleccionada, setLigaSeleccionada] = useState<any>(null);
@@ -229,6 +232,17 @@ export default function Admin({ user, onBack }: Props) {
       }}
     />
   );
+
+  // REDIRECCIÓN NUEVA: Si seleccionas participantes, renderiza el componente secundario de control por jornada
+  if (jornadaParticipantes) return (
+    <ParticipantesView
+      jornada={jornadaParticipantes}
+      onBack={() => {
+        setJornadaParticipantes(null);
+        cargarJornadas();
+      }}
+    />
+  );
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
 
@@ -254,7 +268,7 @@ export default function Admin({ user, onBack }: Props) {
         </button>
       </div>
 
-      {/* Navegación - Actualizada con Ligas y Torneos */}
+      {/* Navegación */}
       <div style={{ display: "flex", backgroundColor: "#16213e", borderBottom: "1px solid #333" }}>
         {[
           { key: "jornadas", label: "🗓 Jornadas" },
@@ -339,6 +353,19 @@ export default function Admin({ user, onBack }: Props) {
                         >
                           ⚡ Resultados
                         </button>
+                        
+                        {/* BOTÓN NUEVO: Permite abrir el control de participantes */}
+                        <button
+                          onClick={() => setJornadaParticipantes(j)}
+                          style={{
+                            flex: 1, padding: "8px", backgroundColor: "#0f3460",
+                            color: "#fff", border: "none", borderRadius: "8px",
+                            fontSize: "13px", cursor: "pointer"
+                          }}
+                        >
+                          👥 Participantes
+                        </button>
+
                         <button
                           onClick={() => {
                             const baseUrl = "https://netlify.app";
@@ -619,7 +646,7 @@ export default function Admin({ user, onBack }: Props) {
     </div>
   );
 }
-// Componente secundario modificado para rastrear la relación Torneo -> Liga -> Equipos
+// Componente secundario: PartidosView
 function PartidosView({ jornada, torneos, onBack }: { jornada: any; torneos: any[]; onBack: () => void }) {
   const [partidos, setPartidos] = useState<any[]>([]);
   const [local, setLocal] = useState("");
@@ -642,7 +669,6 @@ function PartidosView({ jornada, torneos, onBack }: { jornada: any; torneos: any
   const cargarEquiposDeLaLiga = async () => {
     if (jornada.torneoId) {
       try {
-        // Encontramos el torneo actual para saber cuál es su ligaId
         const torneoActual = torneos.find(t => t.id === jornada.torneoId);
         if (torneoActual && torneoActual.ligaId) {
           const q = query(collection(db, "equipos_liga", torneoActual.ligaId, "equipos"), orderBy("nombre"));
@@ -709,144 +735,162 @@ function PartidosView({ jornada, torneos, onBack }: { jornada: any; torneos: any
       setMensaje("❌ Error al cambiar estado");
     }
   };
-
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
-      {/* Header */}
-      <div style={{
-        backgroundColor: "#16213e", padding: "16px 20px",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
-      }}>
+      <div style={{ backgroundColor: "#16213e", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
         <div>
-          <div style={{ fontWeight: "bold", fontSize: "15px" }}>
-            Jornada {jornada.numero} — Partidos
-          </div>
-          <div style={{ color: "#888", fontSize: "12px" }}>
-            {jornada.fechaInicio} — {jornada.fechaFin}
-          </div>
+          <div style={{ fontWeight: "bold", fontSize: "15px" }}>Jornada {jornada.numero} — Partidos</div>
+          <div style={{ color: "#888", fontSize: "12px" }}>{jornada.fechaInicio} — {jornada.fechaFin}</div>
         </div>
-        <button onClick={onBack} style={{
-          backgroundColor: "transparent", border: "1px solid #888",
-          color: "#888", padding: "6px 14px", borderRadius: "8px",
-          cursor: "pointer", fontSize: "13px"
-        }}>
-          ← Volver
-        </button>
+        <button onClick={onBack} style={{ backgroundColor: "transparent", border: "1px solid #888", color: "#888", padding: "6px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>← Volver</button>
       </div>
-
       <div style={{ padding: "20px" }}>
-        {/* Formulario agregar partido */}
         <div style={{ backgroundColor: "#16213e", borderRadius: "12px", padding: "20px", marginBottom: "20px" }}>
           <h3 style={{ color: "#aaa", marginTop: 0, fontSize: "14px" }}>AGREGAR PARTIDO</h3>
-          
           <label style={labelStyle}>Equipo local</label>
           {equiposDeLaLiga.length > 0 ? (
             <select value={local} onChange={(e) => setLocal(e.target.value)} style={inputStyle}>
               <option value="">-- Selecciona Local --</option>
-              {equiposDeLaLiga.map(eq => (
-                <option key={eq.id} value={eq.nombre}>{eq.nombre}</option>
-              ))}
+              {equiposDeLaLiga.map(eq => <option key={eq.id} value={eq.nombre}>{eq.nombre}</option>)}
             </select>
           ) : (
-            <input
-              placeholder="Ej: América"
-              value={local}
-              onChange={(e) => setLocal(e.target.value)}
-              style={inputStyle}
-            />
+            <input placeholder="Ej: América" value={local} onChange={(e) => setLocal(e.target.value)} style={inputStyle} />
           )}
-
           <label style={labelStyle}>Equipo visitante</label>
           {equiposDeLaLiga.length > 0 ? (
             <select value={visitante} onChange={(e) => setVisitante(e.target.value)} style={inputStyle}>
               <option value="">-- Selecciona Visitante --</option>
-              {equiposDeLaLiga.map(eq => (
-                <option key={eq.id} value={eq.nombre}>{eq.nombre}</option>
-              ))}
+              {equiposDeLaLiga.map(eq => <option key={eq.id} value={eq.nombre}>{eq.nombre}</option>)}
             </select>
           ) : (
-            <input
-              placeholder="Ej: Chivas"
-              value={visitante}
-              onChange={(e) => setVisitante(e.target.value)}
-              style={inputStyle}
-            />
+            <input placeholder="Ej: Chivas" value={visitante} onChange={(e) => setVisitante(e.target.value)} style={inputStyle} />
           )}
-
           <label style={labelStyle}>Fecha y hora</label>
-          <input
-            type="datetime-local"
-            value={fechaHora}
-            onChange={(e) => setFechaHora(e.target.value)}
-            style={inputStyle}
-          />
-          {mensaje && (
-            <p style={{ color: mensaje.includes("✅") ? "#4caf50" : mensaje.includes("⚠️") ? "#ff9800" : "#e94560", fontSize: "14px" }}>
-              {mensaje}
-            </p>
-          )}
-          <button onClick={agregarPartido} disabled={loading} style={btnStyle}>
-            {loading ? "Guardando..." : "➕ Agregar Partido"}
-          </button>
+          <input type="datetime-local" value={fechaHora} onChange={(e) => setFechaHora(e.target.value)} style={inputStyle} />
+          {mensaje && <p style={{ color: mensaje.includes("✅") ? "#4caf50" : mensaje.includes("⚠️") ? "#ff9800" : "#e94560", fontSize: "14px" }}>{mensaje}</p>}
+          <button onClick={agregarPartido} disabled={loading} style={btnStyle}>{loading ? "Guardando..." : "➕ Agregar Partido"}</button>
         </div>
-
-        {/* Lista de partidos */}
         {partidos.length > 0 && (
           <div>
-            <h3 style={{ color: "#aaa", fontSize: "14px" }}>
-              PARTIDOS AGREGADOS ({partidos.length})
-            </h3>
+            <h3 style={{ color: "#aaa", fontSize: "14px" }}>PARTIDOS AGREGADOS ({partidos.length})</h3>
             {partidos.map((partido: any) => (
-              <div key={partido.id} style={{
-                backgroundColor: partido.suspendido ? "#2a1a1a" : "#16213e",
-                borderRadius: "12px", padding: "14px", marginBottom: "10px",
-                border: partido.suspendido ? "1px solid #e94560" : "1px solid #333"
-              }}>
+              <div key={partido.id} style={{ backgroundColor: partido.suspendido ? "#2a1a1a" : "#16213e", borderRadius: "12px", padding: "14px", marginBottom: "10px", border: partido.suspendido ? "1px solid #e94560" : "1px solid #333" }}>
                 <div style={{ marginBottom: "8px" }}>
-                  <div style={{ fontWeight: "bold", fontSize: "14px", color: partido.suspendido ? "#888" : "#fff" }}>
-                    {partido.local} vs {partido.visitante}
-                  </div>
-                  <div style={{ color: "#888", fontSize: "12px", marginTop: "2px" }}>
-                    {partido.fechaHora}
-                    {partido.suspendido && (
-                      <span style={{ color: "#e94560", marginLeft: "8px" }}>⚠️ Suspendido</span>
-                    )}
-                  </div>
+                  <div style={{ fontWeight: "bold", fontSize: "14px", color: partido.suspendido ? "#888" : "#fff" }}>{partido.local} vs {partido.visitante}</div>
+                  <div style={{ color: "#888", fontSize: "12px", marginTop: "2px" }}>{partido.fechaHora} {partido.suspendido && <span style={{ color: "#e94560", marginLeft: "8px" }}>⚠️ Suspendido</span>}</div>
                 </div>
                 <div style={{ display: "flex", gap: "8px" }}>
-                  <button
-                    onClick={() => toggleSuspender(partido)}
-                    style={{
-                      flex: 1, padding: "8px", borderRadius: "6px", border: "none",
-                      backgroundColor: partido.suspendido ? "#1b5e20" : "#ff9800",
-                      color: "#fff", cursor: "pointer", fontSize: "12px"
-                    }}
-                  >
-                    {partido.suspendido ? "✅ Rehabilitar" : "⚠️ Suspender"}
-                  </button>
-                  <button
-                    onClick={() => eliminarPartido(partido.id)}
-                    style={{
-                      flex: 1, padding: "8px", borderRadius: "6px", border: "none",
-                      backgroundColor: "#c62828", color: "#fff",
-                      cursor: "pointer", fontSize: "12px"
-                    }}
-                  >
-                    🗑 Eliminar
-                  </button>
+                  <button onClick={() => toggleSuspender(partido)} style={{ flex: 1, padding: "8px", borderRadius: "6px", border: "none", backgroundColor: partido.suspendido ? "#1b5e20" : "#ff9800", color: "#fff", cursor: "pointer", fontSize: "12px" }}>{partido.suspendido ? "✅ Rehabilitar" : "⚠️ Suspender"}</button>
+                  <button onClick={() => eliminarPartido(partido.id)} style={{ flex: 1, padding: "8px", borderRadius: "6px", border: "none", backgroundColor: "#c62828", color: "#fff", cursor: "pointer", fontSize: "12px" }}>🗑 Eliminar</button>
                 </div>
               </div>
             ))}
           </div>
         )}
+        {partidos.length === 0 && <div style={{ backgroundColor: "#16213e", borderRadius: "12px", padding: "20px", textAlign: "center", color: "#888" }}><p>No hay partidos en esta jornada aún.</p></div>}
+      </div>
+    </div>
+  );
+}
 
-        {partidos.length === 0 && (
-          <div style={{
-            backgroundColor: "#16213e", borderRadius: "12px",
-            padding: "20px", textAlign: "center", color: "#888"
-          }}>
-            <p>No hay partidos en esta jornada aún.</p>
+// --- PARTE 4-C: COMPONENTE NUEVO PARTICIPANTESVIEW ---
+function ParticipantesView({ jornada, onBack }: { jornada: any; onBack: () => void }) {
+  const [participantes, setParticipantes] = useState<any[]>([]);
+  const [usuariosMap, setUsuariosMap] = useState<{ [uid: string]: string }>({});
+  const [loading, setLoading] = useState(true);
+  const [mensaje, setMensaje] = useState("");
+
+  useEffect(() => {
+    const inicializar = async () => {
+      try {
+        const uSnap = await getDocs(collection(db, "usuarios"));
+        const temporalMap: { [uid: string]: string } = {};
+        uSnap.docs.forEach(d => {
+          const data = d.data();
+          temporalMap[data.uid] = data.nombre || data.email;
+        });
+        setUsuariosMap(temporalMap);
+
+        const pSnap = await getDocs(collection(db, "pronosticos", jornada.id, "participantes"));
+        const lista = pSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
+        setParticipantes(lista);
+      } catch (e) {
+        console.error("Error cargando moderación de participantes", e);
+      }
+      setLoading(false);
+    };
+    inicializar();
+  }, []);
+  const toggleHabilitar = async (pId: string, estadoActual: boolean) => {
+    setMensaje("");
+    try {
+      const nuevoEstado = !estadoActual;
+      const ref = doc(db, "pronosticos", jornada.id, "participantes", pId);
+      
+      await updateDoc(ref, { deshabilitado: nuevoEstado });
+      setMensaje("✅ Estado del participante actualizado con éxito");
+      
+      setParticipantes(prev => prev.map(item => item.uid === pId ? { ...item, deshabilitado: nuevoEstado } : item));
+    } catch (e) {
+      setMensaje("❌ Error al cambiar los permisos del participante");
+    }
+  };
+
+  if (loading) return (
+    <div style={{ textAlign: "center", color: "#888", padding: "40px" }}>Cargando participantes...</div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
+      {/* Header */}
+      <div style={{ backgroundColor: "#16213e", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
+        <div>
+          <div style={{ fontWeight: "bold", fontSize: "15px" }}>Jornada {jornada.numero} — Participantes Activos</div>
+          <div style={{ color: "#888", fontSize: "12px" }}>Administra los accesos reactivos de esta fecha</div>
+        </div>
+        <button onClick={onBack} style={{ backgroundColor: "transparent", border: "1px solid #888", color: "#888", padding: "6px 14px", borderRadius: "8px", cursor: "pointer", fontSize: "13px" }}>← Volver</button>
+      </div>
+
+      <div style={{ padding: "20px" }}>
+        {mensaje && <div style={{ backgroundColor: "#16213e", borderLeft: "4px solid #e94560", padding: "10px", marginBottom: "15px", borderRadius: "4px", fontSize: "14px" }}>{mensaje}</div>}
+
+        {participantes.length === 0 ? (
+          <div style={{ backgroundColor: "#16213e", borderRadius: "12px", padding: "30px", textAlign: "center", color: "#888" }}>
+            <div style={{ fontSize: "40px", marginBottom: "12px" }}>👥</div>
+            <p>Ningún amigo ha ingresado pronósticos en esta jornada todavía.</p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {participantes.map((p) => {
+              const estaDeshabilitado = p.deshabilitado === true;
+              return (
+                <div key={p.uid} style={{
+                  backgroundColor: "#16213e", borderRadius: "12px", padding: "16px",
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  border: estaDeshabilitado ? "1px solid #ff4444" : "1px solid #333",
+                  opacity: estaDeshabilitado ? 0.6 : 1
+                }}>
+                  <div>
+                    <div style={{ fontWeight: "bold", fontSize: "15px", color: estaDeshabilitado ? "#ff4444" : "#fff" }}>
+                      {usuariosMap[p.uid] || p.uid}
+                    </div>
+                    <div style={{ color: "#888", fontSize: "12px", marginTop: "4px" }}>
+                      Estado: {estaDeshabilitado ? "🚫 Deshabilitado (Puntos en 0)" : "✅ Habilitado para competir"}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => toggleHabilitar(p.uid, estaDeshabilitado)}
+                    style={{
+                      backgroundColor: estaDeshabilitado ? "#4caf50" : "#ff4444",
+                      color: "#fff", border: "none", borderRadius: "6px",
+                      padding: "8px 14px", fontSize: "13px", cursor: "pointer", fontWeight: "bold"
+                    }}
+                  >
+                    {estaDeshabilitado ? "Habilitar" : "Deshabilitar"}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

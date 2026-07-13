@@ -16,9 +16,26 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
   const [guardando, setGuardando] = useState(false);
   const [mensaje, setMensaje] = useState("");
 
+  // ESTADO NUEVO: Rastreará si el administrador penalizó a este usuario en esta jornada
+  const [usuarioDeshabilitado, setUsuarioDeshabilitado] = useState(false);
+
   useEffect(() => {
     const cargar = async () => {
-      // Cargar partidos activos (no suspendidos)
+      // 1. Verificar primero si el documento raíz del participante tiene la bandera de deshabilitado
+      const participanteRef = doc(db, "pronosticos", jornada.id, "participantes", user.uid);
+      const participanteSnap = await getDoc(participanteRef);
+      let baneado = false;
+      
+      if (participanteSnap.exists()) {
+        const pData = participanteSnap.data();
+        if (pData.deshabilitado === true) {
+          baneado = true;
+          setUsuarioDeshabilitado(true);
+          setMensaje("🚫 Has sido deshabilitado de esta jornada por el administrador.");
+        }
+      }
+
+      // 2. Cargar partidos activos (no suspendidos)
       const partidosSnap = await getDocs(
         collection(db, "jornadas", jornada.id, "partidos")
       );
@@ -34,15 +51,15 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
         
       setPartidos(lista);
 
-      // Cargar pronósticos existentes con validación de Jornada Cerrada
+      // 3. Cargar pronósticos existentes
       const iniciales: any = {};
       for (const partido of lista) {
         const ahora = new Date();
         const fechaPartido = new Date((partido as any).fechaHora);
         const unaHoraAntes = new Date(fechaPartido.getTime() - 60 * 60 * 1000);
 
-        // Blinda la quiniela: Si la jornada general está cerrada O ya pasó el tiempo límite
-        if (jornada.estado === "cerrada" || ahora >= unaHoraAntes) {
+        // Si el usuario está deshabilitado, la jornada está cerrada o venció el tiempo, forzamos candado
+        if (baneado || jornada.estado === "cerrada" || ahora >= unaHoraAntes) {
           iniciales[partido.id] = { local: "🔒", visitante: "🔒", bloqueado: true };
           continue;
         }
@@ -64,8 +81,6 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
     };
     cargar();
   }, []);
-
-
   const handleChange = (partidoId: string, tipo: "local" | "visitante", valor: string) => {
     if (valor !== "" && (isNaN(Number(valor)) || Number(valor) < 0)) return;
     setPronosticos(prev => ({
@@ -75,15 +90,30 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
   };
 
   const guardar = async () => {
-    // Si el administrador cerró la jornada, se detiene el guardado por completo
+    // 1. Candado de seguridad: Si la jornada está cerrada
     if (jornada.estado === "cerrada") {
-        setMensaje("❌ Esta jornada ya se encuentra cerrada por el administrador");
-        return;
-      }
+      setMensaje("❌ Esta jornada ya se encuentra cerrada por el administrador");
+      return;
+    }
+
+    // 2. Candado de seguridad: Si el usuario fue deshabilitado por el administrador
+    if (usuarioDeshabilitado) {
+      setMensaje("❌ No puedes guardar cambios porque has sido deshabilitado de esta jornada");
+      return;
+    }
 
     setGuardando(true);
     setMensaje("");
     try {
+      // --- PARCHE DE COMPATIBILIDAD CON FIRESTORE (SIN TIMESTAMP) ---
+      const participanteRef = doc(db, "pronosticos", jornada.id, "participantes", user.uid);
+      
+      // Usamos un string nativo de JS para evitar errores de importación en StackBlitz
+      await setDoc(participanteRef, { 
+        existe: true,
+        actualizadoEn: new Date().toISOString()
+      }, { merge: true });
+
       for (const partido of partidos) {
         const p = pronosticos[partido.id];
         if (!p || p.local === "" || p.visitante === "" || (p as any).bloqueado) continue;
@@ -163,9 +193,14 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
                 }}>
                   <div style={{ fontSize: "12px", color: "#888", marginBottom: "10px" }}>
                     {partido.fechaHora.replace("T", " ")}
-                    {bloqueado && (
+                    {(bloqueado && !usuarioDeshabilitado) && (
                       <span style={{ color: "#e94560", marginLeft: "8px" }}>
                         🔒 Pronóstico cerrado
+                      </span>
+                    )}
+                    {usuarioDeshabilitado && (
+                      <span style={{ color: "#ff4444", marginLeft: "8px" }}>
+                        🚫 No autorizado
                       </span>
                     )}
                   </div>
@@ -181,10 +216,10 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
                         type="number"
                         min="0"
                         placeholder="0"
-                        disabled={bloqueado}
-                        value={bloqueado ? "" : (pro?.local || "")}
+                        disabled={bloqueado || usuarioDeshabilitado}
+                        value={bloqueado || usuarioDeshabilitado ? "" : (pro?.local || "")}
                         onChange={(e) => handleChange(partido.id, "local", e.target.value)}
-                        style={{ ...golesInput, opacity: bloqueado ? 0.5 : 1 }}
+                        style={{ ...golesInput, opacity: bloqueado || usuarioDeshabilitado ? 0.5 : 1 }}
                       />
                     </div>
                     <div style={{ color: "#e94560", fontWeight: "bold", fontSize: "18px" }}>
@@ -198,10 +233,10 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
                         type="number"
                         min="0"
                         placeholder="0"
-                        disabled={bloqueado}
-                        value={bloqueado ? "" : (pro?.visitante || "")}
+                        disabled={bloqueado || usuarioDeshabilitado}
+                        value={bloqueado || usuarioDeshabilitado ? "" : (pro?.visitante || "")}
                         onChange={(e) => handleChange(partido.id, "visitante", e.target.value)}
-                        style={{ ...golesInput, opacity: bloqueado ? 0.5 : 1 }}
+                        style={{ ...golesInput, opacity: bloqueado || usuarioDeshabilitado ? 0.5 : 1 }}
                       />
                     </div>
                   </div>
@@ -217,11 +252,11 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
 
             <button
               onClick={guardar}
-              disabled={guardando}
+              disabled={guardando || usuarioDeshabilitado}
               style={{
-                width: "100%", padding: "14px", backgroundColor: "#e94560",
-                color: "#fff", border: "none", borderRadius: "8px",
-                fontSize: "16px", fontWeight: "bold", cursor: "pointer",
+                width: "100%", padding: "14px", backgroundColor: usuarioDeshabilitado ? "#333" : "#e94560",
+                color: usuarioDeshabilitado ? "#888" : "#fff", border: "none", borderRadius: "8px",
+                fontSize: "16px", fontWeight: "bold", cursor: usuarioDeshabilitado ? "not-allowed" : "pointer",
                 marginTop: "8px"
               }}
             >
