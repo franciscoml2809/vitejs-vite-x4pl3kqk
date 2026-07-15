@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import {
-  collection, getDocs, doc, updateDoc, setDoc, getDoc
+  collection, getDocs, doc, updateDoc, setDoc
 } from "firebase/firestore";
 
 interface Props {

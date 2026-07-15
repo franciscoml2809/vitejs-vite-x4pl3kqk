@@ -35,10 +35,10 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
         const tSnap = await getDocs(collection(db, "torneos"));
         const lSnap = await getDocs(collection(db, "ligas"));
         
-        const torneoActual = tSnap.docs.map(d => ({ id: d.id, ...d.data() })).find(t => t.id === jornada.torneoId);
+        const torneoActual = tSnap.docs.map(d => ({ id: d.id, ...d.data() })).find(t => t.id === jornada.torneoId) as any;
         if (torneoActual) {
           setNombreTorneoReporte(torneoActual.nombre + " (" + (torneoActual.tipo === "regular" ? "Regular" : "Eliminatoria") + ")");
-          const ligaActual = lSnap.docs.map(d => ({ id: d.id, ...d.data() })).find(l => l.id === torneoActual.ligaId);
+          const ligaActual = lSnap.docs.map(d => ({ id: d.id, ...d.data() })).find(l => l.id === torneoActual.ligaId) as any;
           if (ligaActual) {
             setNombreLigaReporte(ligaActual.nombre);
           }
@@ -126,7 +126,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
     }
     setExportando(false);
   };
-  // FUNCIÓN CORREGIDA: Remueve el error de la variable fantasma "actualizado"
   const toggleHabilitar = async (pId: string, estadoActual: boolean) => {
     setMensaje("");
     try {
@@ -141,7 +140,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
     }
   };
 
-  // NUEVA FUNCIÓN: Control asíncrono para registrar o remover la cuota de la jornada
   const togglePago = async (pId: string, pagoActual: boolean) => {
     setMensaje("");
     try {
@@ -161,7 +159,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
-      {/* Barra de Encabezado */}
       <div style={{ backgroundColor: "#16213e", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
         <div>
           <div style={{ fontWeight: "bold", fontSize: "15px" }}>Jornada {jornada.numero} — Participantes Activos</div>
@@ -193,7 +190,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
               {exportando ? "Generando Reporte..." : "📥 Exportar Pronósticos Habilitados (.txt)"}
             </button>
 
-            {/* Listado Interactivo Ooptimizado para el Administrador */}
             {participantes.map((p) => {
               const estaDeshabilitado = p.deshabilitado === true;
               const tienePago = p.pagoRealizado === true;
@@ -210,7 +206,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
                   opacity: estaDeshabilitado ? 0.6 : 1,
                   boxShadow: tienePago ? "0 2px 8px rgba(76,175,80,0.1)" : "none"
                 }}>
-                  {/* Bloque Izquierdo: Nombre y Datos */}
                   <div style={{ flex: 1, minWidth: "0" }}>
                     <div style={{ 
                       fontWeight: "bold", 
@@ -225,9 +220,7 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
                     </div>
                   </div>
 
-                  {/* Bloque Derecho: Controles Compactos Alineados */}
                   <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    {/* Checkbox de pago interactivo (Oculto si el usuario está deshabilitado) */}
                     {!estaDeshabilitado && (
                       <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "12px", color: tienePago ? "#81c784" : "#aaa", userSelect: "none" }}>
                         <input
@@ -240,7 +233,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
                       </label>
                     )}
 
-                    {/* Botón Habilitar/Deshabilitar Miniatura Compacto */}
                     <button
                       onClick={() => toggleHabilitar(p.uid, estaDeshabilitado)}
                       style={{

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { db } from "../firebase";
 import { collection, addDoc, getDocs, doc, deleteDoc, query, orderBy, Timestamp } from "firebase/firestore";
 
@@ -8,10 +8,6 @@ interface LigasAdminViewProps {
   cargarLigas: () => void;
   setMensajeGeneral: (msg: string) => void;
 }
-
-const labelStyle: React.CSSProperties = {
-  display: "block", color: "#aaa", fontSize: "13px", marginBottom: "6px"
-};
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "12px 16px", marginBottom: "16px",
