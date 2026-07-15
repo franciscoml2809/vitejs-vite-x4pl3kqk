@@ -12,20 +12,40 @@ interface Props {
 export default function Jornadas({ user }: Props) {
   const [jornadas, setJornadas] = useState<any[]>([]);
   const [torneos, setTorneos] = useState<any[]>([]); 
-  const [ligas, setLigas] = useState<any[]>([]); // Estado añadido para las ligas base
+  const [ligas, setLigas] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
   const [jornadaActiva, setJornadaActiva] = useState<any>(null);
   const [jornadaMisPuntos, setJornadaMisPuntos] = useState<any>(null);
 
   useEffect(() => {
     const cargar = async () => {
-      // 1. Cargamos las jornadas ordenadas por número
+      // 1. Cargar las jornadas cronológicas
       const qJornadas = query(collection(db, "jornadas"), orderBy("numero"));
       const snapJornadas = await getDocs(qJornadas);
-      const listaJornadas = snapJornadas.docs.map(d => ({ id: d.id, ...d.data() }));
-      setJornadas(listaJornadas);
+      
+      // Lógica de conteo embebida por cada jornada para inyectar estadísticas financieras en vivo
+      const listaJornadasTemp = [];
+      for (const docSnap of snapJornadas.docs) {
+        const jData = docSnap.data();
+        const jId = docSnap.id;
 
-      // 2. Cargamos los torneos / ediciones
+        // Consultar la subcolección jerárquica de participantes de esta fecha específica
+        const pSnap = await getDocs(collection(db, "pronosticos", jId, "participantes"));
+        const listaParticipantes = pSnap.docs.map(d => d.data());
+
+        // Procesar totales descartando duplicados o estructuras vacías
+        const totalParticipantes = listaParticipantes.length;
+        const totalPagados = listaParticipantes.filter(p => p.pagoRealizado === true).length;
+
+        listaJornadasTemp.push({
+          id: jId,
+          ...jData,
+          totalParticipantes,
+          totalPagados
+        });
+      }
+      setJornadas(listaJornadasTemp);
+
       try {
         const qTorneos = query(collection(db, "torneos"), orderBy("nombre"));
         const snapTorneos = await getDocs(qTorneos);
@@ -35,7 +55,6 @@ export default function Jornadas({ user }: Props) {
         console.error("Error al cargar torneos en Dashboard", e);
       }
 
-      // 3. Cargamos las ligas base para armar los nombres jerárquicos
       try {
         const qLigas = query(collection(db, "ligas"), orderBy("nombre"));
         const snapLigas = await getDocs(qLigas);
@@ -78,90 +97,160 @@ export default function Jornadas({ user }: Props) {
 
   if (loading) return (
     <div style={{ textAlign: "center", color: "#888", padding: "40px" }}>
-      Cargando jornadas...
+      Cargando jornadas y estadísticas...
     </div>
   );
 
-  if (jornadas.length === 0) return (
-    <div style={{
-      backgroundColor: "#16213e", borderRadius: "12px",
-      padding: "20px", textAlign: "center", color: "#888"
-    }}>
-      <div style={{ fontSize: "40px", marginBottom: "12px" }}>📋</div>
-      <p>No hay jornadas activas por el momento.</p>
-      <p style={{ fontSize: "13px" }}>El administrador publicará la próxima jornada pronto.</p>
-    </div>
+  const jornadasVisibles = jornadas.filter(
+    j => j.estado === "abierta" || j.estado === "en_progreso"
   );
 
-  return (
-    <div>
-      <h2 style={{ color: "#e94560", marginTop: 0 }}>Jornadas</h2>
-      {jornadas.map((jornada) => {
-        // Buscamos el torneo asignado y la liga dueña de ese torneo
-        const torneoAsociado = torneos.find(t => t.id === jornada.torneoId);
-        const ligaAsociada = torneoAsociado ? ligas.find(l => l.id === torneoAsociado.ligaId) : null;
-
-        return (
-          <div key={jornada.id} style={{
+  const jornadasFinalizadas = jornadas
+    .filter(j => j.estado === "finalizada")
+    .sort((a, b) => b.numero - a.numero)
+    .slice(0, 3);
+    return (
+      <div>
+        {/* SECCIÓN 1: JORNADAS ACTIVAS DE LA SEMANA */}
+        <h2 style={{ color: "#e94560", marginTop: 0 }}>Jornadas Activas</h2>
+        
+        {jornadasVisibles.length === 0 ? (
+          <div style={{
             backgroundColor: "#16213e", borderRadius: "12px",
-            padding: "16px", marginBottom: "12px",
-            border: "1px solid #333"
+            padding: "20px", textAlign: "center", color: "#888", marginBottom: "30px"
           }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: "bold", fontSize: "16px" }}>
-                  Jornada {jornada.numero}
-                </div>
-                
-                {/* Bloque jerárquico del torneo actualizado */}
-                {torneoAsociado && (
-                  <div style={{ color: "#e94560", fontSize: "13px", fontWeight: "bold", marginTop: "4px" }}>
-                    🏆 {ligaAsociada ? ligaAsociada.nombre + " — " : ""}{torneoAsociado.nombre} ({torneoAsociado.tipo === "regular" ? "Regular" : "Eliminatoria"})
-                  </div>
-                )}
-
-                <div style={{ color: "#888", fontSize: "13px", marginTop: "4px" }}>
-                  {jornada.fechaInicio} — {jornada.fechaFin}
-                </div>
-              </div>
-              <div style={{
-                backgroundColor: jornada.estado === "abierta" ? "#1b5e20" : "#333",
-                color: jornada.estado === "abierta" ? "#4caf50" : "#888",
-                padding: "4px 10px", borderRadius: "20px", fontSize: "12px"
-              }}>
-                {jornada.estado === "abierta" ? "Abierta" : "Cerrada"}
-              </div>
-            </div>
-
-            {jornada.estado === "abierta" && (
-              <button
-                onClick={() => setJornadaActiva(jornada)}
-                style={{
-                  marginTop: "12px", width: "100%", padding: "10px",
-                  backgroundColor: "#e94560", color: "#fff", border: "none",
-                  borderRadius: "8px", fontSize: "14px", cursor: "pointer",
-                  fontWeight: "bold"
-                }}
-              >
-                Llenar pronósticos →
-              </button>
-            )}
-
-            <button
-              onClick={() => setJornadaMisPuntos(jornada)}
-              style={{
-                marginTop: "12px", width: "100%", padding: "10px",
-                backgroundColor: "#0f3460", color: "#fff", border: "none",
-                borderRadius: "8px", fontSize: "14px", cursor: "pointer",
-                fontWeight: "bold"
-              }}
-            >
-              📊 Ver mis puntos
-            </button>
-
+            <div style={{ fontSize: "40px", marginBottom: "12px" }}>📋</div>
+            <p>No hay jornadas activas por el momento.</p>
+            <p style={{ fontSize: "13px" }}>El administrador publicará la próxima jornada pronto.</p>
           </div>
-        );
-      })}
-    </div>
-  );
-}
+        ) : (
+          jornadasVisibles.map((jornada) => {
+            const torneoAsociado = torneos.find(t => t.id === jornada.torneoId);
+            const ligaAsociada = torneoAsociado ? ligas.find(l => l.id === torneoAsociado.ligaId) : null;
+            const esAbierta = jornada.estado === "abierta";
+  
+            return (
+              <div key={jornada.id} style={{
+                backgroundColor: "#16213e", borderRadius: "12px",
+                padding: "16px", marginBottom: "12px",
+                border: "1px solid #333"
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: "bold", fontSize: "16px" }}>
+                      Jornada {jornada.numero}
+                    </div>
+                    {torneoAsociado && (
+                      <div style={{ color: "#e94560", fontSize: "13px", fontWeight: "bold", marginTop: "4px" }}>
+                        🏆 {ligaAsociada ? ligaAsociada.nombre + " — " : ""}{torneoAsociado.nombre}
+                      </div>
+                    )}
+                    
+                    {/* INDICADORES EN VIVO DE COMPETIDORES Y FINANZAS */}
+                    <div style={{ display: "flex", gap: "12px", marginTop: "4px", fontSize: "12px", color: "#aaa" }}>
+                      <span>👥 {jornada.totalParticipantes || 0} Jugadores</span>
+                      <span style={{ color: (jornada.totalPagados === jornada.totalParticipantes && jornada.totalParticipantes > 0) ? "#4caf50" : "#ff9800" }}>
+                        💰 {jornada.totalPagados || 0} Pagados
+                      </span>
+                    </div>
+  
+                    <div style={{ color: "#666", fontSize: "12px", marginTop: "4px" }}>
+                      {jornada.fechaInicio} — {jornada.fechaFin}
+                    </div>
+                  </div>
+                  <div style={{
+                    backgroundColor: esAbierta ? "#1b5e20" : "#e65100",
+                    color: esAbierta ? "#4caf50" : "#ffb74d",
+                    padding: "4px 10px", borderRadius: "20px", fontSize: "12px",
+                    fontWeight: "bold"
+                  }}>
+                    {esAbierta ? "Abierta" : "En Progreso"}
+                  </div>
+                </div>
+  
+                {esAbierta ? (
+                  <button
+                    onClick={() => setJornadaActiva(jornada)}
+                    style={{
+                      marginTop: "14px", width: "100%", padding: "10px",
+                      backgroundColor: "#e94560", color: "#fff", border: "none",
+                      borderRadius: "8px", fontSize: "14px", cursor: "pointer",
+                      fontWeight: "bold"
+                    }}
+                  >
+                    Llenar pronósticos →
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => setJornadaMisPuntos(jornada)}
+                    style={{
+                      marginTop: "14px", width: "100%", padding: "10px",
+                      backgroundColor: "#0f3460", color: "#fff", border: "none",
+                      borderRadius: "8px", fontSize: "14px", cursor: "pointer",
+                      fontWeight: "bold", boxShadow: "0 4px 10px rgba(15, 52, 96, 0.3)"
+                    }}
+                  >
+                    📊 Ver mis puntos / Quiniela
+                  </button>
+                )}
+              </div>
+            );
+          })
+        )}
+  
+        {/* SECCIÓN 2: HISTORIAL RECIENTE COMPACTO */}
+        <div style={{ marginTop: "30px" }}>
+          <h3 style={{ color: "#888", fontSize: "15px", borderBottom: "1px solid #333", paddingBottom: "8px", marginBottom: "12px" }}>
+            📜 Historial Reciente (Últimas 3 Jornadas)
+          </h3>
+          
+          {jornadasFinalizadas.length === 0 ? (
+            <div style={{ color: "#555", fontSize: "13px", padding: "10px 0", fontStyle: "italic" }}>
+              No hay jornadas finalizadas en el historial todavía.
+            </div>
+          ) : (
+            jornadasFinalizadas.map((jornada) => {
+              const torneoAsociado = torneos.find(t => t.id === jornada.torneoId);
+              const ligaAsociada = torneoAsociado ? ligas.find(l => l.id === torneoAsociado.ligaId) : null;
+  
+              return (
+                <div key={jornada.id} style={{
+                  backgroundColor: "#12192c", borderRadius: "12px",
+                  padding: "12px 16px", marginBottom: "10px",
+                  border: "1px solid #222", opacity: 0.85
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: "bold", fontSize: "14px", color: "#ccc" }}>
+                        Jornada {jornada.numero} (Finalizada)
+                      </div>
+                      {torneoAsociado && (
+                        <div style={{ color: "#888", fontSize: "12px", marginTop: "2px" }}>
+                          {ligaAsociada ? ligaAsociada.nombre + " — " : ""}{torneoAsociado.nombre}
+                        </div>
+                      )}
+                      {/* Datos financieros informativos en el historial */}
+                      <div style={{ fontSize: "11px", color: "#666", marginTop: "2px" }}>
+                        👥 {jornada.totalParticipantes || 0} Jugadores | 💰 {jornada.totalPagados || 0} Pagados
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setJornadaMisPuntos(jornada)}
+                      style={{
+                        padding: "8px 16px", backgroundColor: "#0f3460", 
+                        color: "#fff", border: "none",
+                        borderRadius: "6px", fontSize: "12px", cursor: "pointer", fontWeight: "bold"
+                      }}
+                    >
+                      📊 Puntos / Quiniela
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  }
+  
