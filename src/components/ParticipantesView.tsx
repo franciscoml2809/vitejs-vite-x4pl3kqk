@@ -95,7 +95,8 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
           proMap[d.id] = d.data();
         });
 
-        for (const partido of listaPartidos) {
+        // PARCHADO DE NETLIFY: Forzado de tipo explícito (partido: any) para dar paso libre a las propiedades
+        for (const partido of listaPartidos as any[]) {
           const proGuardado = proMap[partido.id];
           if (proGuardado) {
             txt += partido.local + " ( " + proGuardado.golesLocal + " ) vs ( " + proGuardado.golesVisitante + " ) " + partido.visitante + "\n";
@@ -159,6 +160,7 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
 
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
+      {/* Barra de Encabezado */}
       <div style={{ backgroundColor: "#16213e", padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
         <div>
           <div style={{ fontWeight: "bold", fontSize: "15px" }}>Jornada {jornada.numero} — Participantes Activos</div>
@@ -241,7 +243,7 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
                         padding: "6px 12px", fontSize: "11px", cursor: "pointer", fontWeight: "bold"
                       }}
                     >
-                      {estaDeshabilitado ? "Habilitar" : "Baneas"}
+                      {estaDeshabilitado ? "Habilitar" : "Banear"}
                     </button>
                   </div>
 
