@@ -221,7 +221,7 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
       {/* Header Superior Fijo */}
       <div style={{
         backgroundColor: "#16213e", padding: "16px 20px",
-        display: "flex", justifyBetween: "space-between", alignItems: "center",
+        display: "flex", justifyContent: "space-between", alignItems: "center",
         boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "sticky", top: 0, zIndex: 10
       }}>
         <div>

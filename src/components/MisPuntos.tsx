@@ -53,8 +53,8 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
       .filter(Boolean)
       // Ordenación precisa usando el string fechaHora nativo guardado por el administrador
       .sort((a, b) => {
-        const fA = a.partido?.fechaHora || "";
-        const fB = b.partido?.fechaHora || "";
+        const fA = a?.partido?.fechaHora || "";
+        const fB = b?.partido?.fechaHora || "";
         if (fA < fB) return -1;
         if (fA > fB) return 1;
         return 0;
