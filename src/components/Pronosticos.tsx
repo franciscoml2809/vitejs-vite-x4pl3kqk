@@ -17,6 +17,10 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
   const [mensaje, setMensaje] = useState("");
   const [usuarioDeshabilitado, setUsuarioDeshabilitado] = useState(false);
 
+  // Estados defensivos anti error de dedo optimizados por partido individual
+  const [alertaInusual, setAlertaInusual] = useState("");
+  const [bloqueoPreventivo, setBloqueoPreventivo] = useState(false);
+  const [partidosConError, setPartidosConError] = useState<string[]>([]);
   useEffect(() => {
     const cargar = async () => {
       // 1. Verificar si el participante está deshabilitado por moderación
@@ -74,15 +78,15 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
         if (proSnap.exists()) {
           const data = proSnap.data();
           iniciales[partido.id] = {
-            local: String(data.golesLocal),
-            visitante: String(data.golesVisitante),
+            local: data.golesLocal !== null && data.golesLocal !== undefined ? String(data.golesLocal) : "",
+            visitante: data.golesVisitante !== null && data.golesVisitante !== undefined ? String(data.golesVisitante) : "",
             bloqueado: partidoBloqueado
           };
         } else {
-          // Si está bloqueado de origen y nunca guardó, ponemos un guión neutral para no confundir con un cero real
+          // Inicializa en blanco limpio para que deje borrar de forma totalmente fluida
           iniciales[partido.id] = { 
-            local: partidoBloqueado ? "-" : "0", 
-            visitante: partidoBloqueado ? "-" : "0",
+            local: partidoBloqueado ? "-" : "", 
+            visitante: partidoBloqueado ? "-" : "",
             bloqueado: partidoBloqueado
           };
         }
@@ -91,33 +95,86 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
       setLoading(false);
     };
     cargar();
-  }, [jornada.estado]); // Escucha reactiva si el administrador altera el estado desde afuera
+  }, [jornada.estado]);
 
   const handleChange = (partidoId: string, tipo: "local" | "visitante", valor: string) => {
-    // Si la bandera defensiva local marca bloqueado, rechazar el cambio de inmediato
     if (pronosticos[partidoId]?.bloqueado) return;
     
-    if (valor !== "" && (isNaN(Number(valor)) || Number(valor) < 0)) return;
+    // BLINDAJE DIRECTO: Si el usuario borra con el teclado, dejamos el input en blanco total
+    if (valor === "" || valor === null || valor === undefined) {
+      setPronosticos(prev => ({
+        ...prev,
+        [partidoId]: { ...prev[partidoId], [tipo]: "" }
+      }));
+      return;
+    }
+
+    // Si el cuadro tiene un vacío o un cero y el usuario escribe un número, remueve el cero de inmediato
+    let valorProcesado = valor;
+    if (valor.length > 1 && valor.startsWith("0")) {
+      valorProcesado = valor.replace(/^0+/, "");
+    }
+    
+    if (isNaN(Number(valorProcesado)) || Number(valorProcesado) < 0) return;
+    
+    setAlertaInusual("");
+    setBloqueoPreventivo(false);
+    setPartidosConError([]);
+
     setPronosticos(prev => ({
       ...prev,
-      [partidoId]: { ...prev[partidoId], [tipo]: valor }
+      [partidoId]: { ...prev[partidoId], [tipo]: valorProcesado }
     }));
   };
+
+
   const guardar = async () => {
-    // Candado de seguridad 1: La jornada mutó o avanzó en el backend
     if (jornada.estado !== "abierta") {
       setMensaje("❌ Esta jornada se encuentra cerrada para recibir modificaciones.");
       return;
     }
 
-    // Candado de seguridad 2: Usuario penalizado
     if (usuarioDeshabilitado) {
       setMensaje("❌ No puedes guardar cambios porque has sido deshabilitado de esta jornada");
       return;
     }
 
+    // Escaneo defensivo detallado por ID de partido individual
+    let erroresDetectados: string[] = [];
+    let mayorGoles = 0;
+    let partidoEjemploNombre = "";
+
+    for (const partido of partidos) {
+      const p = pronosticos[partido.id];
+      if (!p || p.local === "" || p.visitante === "" || p.bloqueado) continue;
+      
+      const gl = parseInt(p.local);
+      const gv = parseInt(p.visitante);
+      
+      if (gl > 6 || gv > 6) {
+        erroresDetectados.push(partido.id);
+        const maxLocalOVisitante = gl > gv ? gl : gv;
+        if (maxLocalOVisitante > mayorGoles) {
+          mayorGoles = maxLocalOVisitante;
+          partidoEjemploNombre = partido.local + " vs " + partido.visitante;
+        }
+      }
+    }
+
+    // Si hay inputs inusuales (>6), se frena transitoriamente el flujo y se marcan las tarjetas específicas
+    if (erroresDetectados.length > 0 && !bloqueoPreventivo) {
+      setPartidosConError(erroresDetectados);
+      setAlertaInusual("⚠️ Alerta en [" + partidoEjemploNombre + "]: Detectamos un marcador inusual de " + mayorGoles + " goles. Verifica las tarjetas marcadas en rojo antes de continuar.");
+      setBloqueoPreventivo(true);
+      return;
+    }
+
     setGuardando(true);
     setMensaje("");
+    setAlertaInusual("");
+    setBloqueoPreventivo(false);
+    setPartidosConError([]);
+
     try {
       const participanteRef = doc(db, "pronosticos", jornada.id, "participantes", user.uid);
       await setDoc(participanteRef, { 
@@ -147,6 +204,7 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
         );
       }
       setMensaje("✅ Pronósticos guardados con éxito");
+      setAlertaInusual(""); 
     } catch (e) {
       setMensaje("❌ Error al guardar en el servidor");
     }
@@ -158,14 +216,13 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
       Cargando partidos disponibles...
     </div>
   );
-
   return (
-    <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
-      {/* Header */}
+    <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff", display: "flex", flexDirection: "column" }}>
+      {/* Header Superior Fijo */}
       <div style={{
         backgroundColor: "#16213e", padding: "16px 20px",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.3)"
+        display: "flex", justifyBetween: "space-between", alignItems: "center",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.3)", position: "sticky", top: 0, zIndex: 10
       }}>
         <div>
           <div style={{ fontWeight: "bold", fontSize: "15px" }}>
@@ -184,18 +241,9 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
         </button>
       </div>
 
-      <div style={{ padding: "20px" }}>
-        {/* Banner de mensajes/alertas reactivas */}
-        {mensaje && (
-          <div style={{
-            backgroundColor: "#16213e", padding: "12px", borderRadius: "8px",
-            marginBottom: "16px", borderLeft: "4px solid #e94560", fontSize: "13px",
-            color: "#ccc"
-          }}>
-            {mensaje}
-          </div>
-        )}
-
+      {/* Contenedor de Partidos Deslizable */}
+      <div style={{ padding: "20px", flex: 1, paddingBottom: "140px" }}> {/* paddingBottom vital para que la barra no tape el último partido */}
+        
         {partidos.length === 0 ? (
           <div style={{
             backgroundColor: "#16213e", borderRadius: "12px",
@@ -204,110 +252,140 @@ export default function Pronosticos({ user, jornada, onBack }: Props) {
             <p>No hay partidos cargados en esta jornada.</p>
           </div>
         ) : (
-          <>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {partidos.map((partido) => {
-                const pro = pronosticos[partido.id];
-                const bloqueado = pro?.bloqueado;
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {partidos.map((partido) => {
+              const pro = pronosticos[partido.id];
+              const bloqueado = pro?.bloqueado;
+              const tieneErrorGoles = partidosConError.includes(partido.id);
 
-                return (
-                  <div key={partido.id} style={{
-                    backgroundColor: "#16213e", borderRadius: "12px",
-                    padding: "12px 16px", marginBottom: "4px",
-                    border: bloqueado ? "1px solid #555" : "1px solid #333",
-                    opacity: bloqueado ? 0.75 : 1
-                  }}>
-                    {/* Fecha y Leyendas Horarias Informativas */}
-                    <div style={{ fontSize: "11px", color: "#888", marginBottom: "8px" }}>
-                      {partido.fechaHora.replace("T", " ")}
-                      {(bloqueado && !usuarioDeshabilitado && jornada.estado === "abierta") && (
-                        <span style={{ color: "#e94560", marginLeft: "8px", fontWeight: "bold" }}>
-                          🔒 Tiempo expirado
-                        </span>
-                      )}
-                      {(bloqueado && !usuarioDeshabilitado && jornada.estado !== "abierta") && (
-                        <span style={{ color: "#ff9800", marginLeft: "8px", fontWeight: "bold" }}>
-                          🔒 Jornada en juego
-                        </span>
-                      )}
-                      {usuarioDeshabilitado && (
-                        <span style={{ color: "#ff4444", marginLeft: "8px", fontWeight: "bold" }}>
-                          🚫 No autorizado
-                        </span>
-                      )}
+              return (
+                <div key={partido.id} style={{
+                  backgroundColor: "#16213e", borderRadius: "12px",
+                  padding: "12px 16px", marginBottom: "4px",
+                  border: tieneErrorGoles ? "2px solid #ef4444" : bloqueado ? "1px solid #555" : "1px solid #333",
+                  boxShadow: tieneErrorGoles ? "0 0 10px rgba(239, 68, 68, 0.3)" : "none",
+                  opacity: bloqueado ? 0.75 : 1,
+                  transition: "all 0.2s ease"
+                }}>
+                  <div style={{ fontSize: "11px", color: "#888", marginBottom: "8px" }}>
+                    {partido.fechaHora.replace("T", " ")}
+                    {(bloqueado && !usuarioDeshabilitado && jornada.estado === "abierta") && (
+                      <span style={{ color: "#e94560", marginLeft: "8px", fontWeight: "bold" }}>
+                        🔒 Tiempo expirado
+                      </span>
+                    )}
+                    {(bloqueado && !usuarioDeshabilitado && jornada.estado !== "abierta") && (
+                      <span style={{ color: "#ff9800", marginLeft: "8px", fontWeight: "bold" }}>
+                        🔒 Jornada en juego
+                      </span>
+                    )}
+                    {usuarioDeshabilitado && (
+                      <span style={{ color: "#ff4444", marginLeft: "8px", fontWeight: "bold" }}>
+                        🚫 No autorizado
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "10px" }}>
+                    {/* Local */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontWeight: "bold", fontSize: "14px", marginBottom: "6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {partido.local}
+                      </div>
+                      <input
+                        type="text"
+                        disabled={bloqueado}
+                        value={pro?.local === "0" ? "0" : (pro?.local ?? "")}
+                        onChange={(e) => handleChange(partido.id, "local", e.target.value)}
+                        style={{ 
+                          ...golesInput, 
+                          backgroundColor: bloqueado ? "#222" : "#0f3460",
+                          border: tieneErrorGoles ? "2px solid #ef4444" : bloqueado ? "1px solid #444" : "1px solid #e94560",
+                          color: bloqueado ? "#888" : "#fff",
+                          opacity: bloqueado ? 0.6 : 1 
+                        }}
+                      />
                     </div>
 
-                    {/* Fila en Rejilla de Confrontación Simétrica */}
-                    <div style={{
-                      display: "grid", gridTemplateColumns: "1fr auto 1fr",
-                      alignItems: "center", gap: "10px"
-                    }}>
-                      {/* Local */}
-                      <div style={{ textAlign: "center" }}>
-                        <div style={{ fontWeight: "bold", fontSize: "14px", marginBottom: "6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {partido.local}
-                        </div>
-                        <input
-                          type="text"
-                          disabled={bloqueado}
-                          value={pro?.local || "0"}
-                          onChange={(e) => handleChange(partido.id, "local", e.target.value)}
-                          style={{ 
-                            ...golesInput, 
-                            backgroundColor: bloqueado ? "#222" : "#0f3460",
-                            border: bloqueado ? "1px solid #444" : "1px solid #e94560",
-                            color: bloqueado ? "#888" : "#fff",
-                            opacity: bloqueado ? 0.6 : 1 
-                          }}
-                        />
-                      </div>
+                    <div style={{ color: "#e94560", fontWeight: "bold", fontSize: "16px", marginTop: "18px" }}>
+                      VS
+                    </div>
 
-                      {/* Divisor */}
-                      <div style={{ color: "#e94560", fontWeight: "bold", fontSize: "16px", marginTop: "18px" }}>
-                        VS
+                    {/* Visitante */}
+                    <div style={{ textAlign: "center" }}>
+                      <div style={{ fontWeight: "bold", fontSize: "14px", marginBottom: "6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {partido.visitante}
                       </div>
-
-                      {/* Visitante */}
-                      <div style={{ textAlign: "center" }}>
-                        <div style={{ fontWeight: "bold", fontSize: "14px", marginBottom: "6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {partido.visitante}
-                        </div>
-                        <input
-                          type="text"
-                          disabled={bloqueado}
-                          value={pro?.visitante || "0"}
-                          onChange={(e) => handleChange(partido.id, "visitante", e.target.value)}
-                          style={{ 
-                            ...golesInput, 
-                            backgroundColor: bloqueado ? "#222" : "#0f3460",
-                            border: bloqueado ? "1px solid #444" : "1px solid #e94560",
-                            color: bloqueado ? "#888" : "#fff",
-                            opacity: bloqueado ? 0.6 : 1 
-                          }}
-                        />
-                      </div>
+                      <input
+                        type="text"
+                        disabled={bloqueado}
+                        value={pro?.visitante === "0" ? "0" : (pro?.visitante ?? "")}
+                        onChange={(e) => handleChange(partido.id, "visitante", e.target.value)}
+                        style={{ 
+                          ...golesInput, 
+                          backgroundColor: bloqueado ? "#222" : "#0f3460",
+                          border: tieneErrorGoles ? "2px solid #ef4444" : bloqueado ? "1px solid #444" : "1px solid #e94560",
+                          color: bloqueado ? "#888" : "#fff",
+                          opacity: bloqueado ? 0.6 : 1 
+                        }}
+                      />
                     </div>
                   </div>
-                );
-              })}
-            </div>
 
-            {/* El botón de guardar se evapora si la jornada ya está bloqueada por el administrador */}
-            {jornada.estado === "abierta" && !usuarioDeshabilitado && (
-              <button
-                onClick={guardar}
-                disabled={guardando}
-                style={{
-                  width: "100%", padding: "14px", backgroundColor: "#e94560",
-                  color: "#fff", border: "none", borderRadius: "8px",
-                  fontSize: "16px", fontWeight: "bold", cursor: "pointer",
-                  marginTop: "16px", boxShadow: "0 4px 12px rgba(233, 69, 96, 0.3)"
-                }}
-              >
-                {guardando ? "Guardando Quiniela..." : "💾 Guardar mi quiniela"}
-              </button>
-            )}
-          </>
+                  {tieneErrorGoles && (
+                    <div style={{ color: "#f87171", fontSize: "11px", textAlign: "center", marginTop: "10px", fontWeight: "bold" }}>
+                      ⚠️ Marcador inusual. Verifica si los goles son correctos.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* BARRA DE ACCIÓN MAESTRA FIJADA AL FONDO (Sticky Bottom Bar) */}
+      <div style={{
+        position: "fixed", bottom: 0, left: 0, right: 0,
+        backgroundColor: "#16213e", padding: "14px 20px",
+        borderTop: "1px solid #333", boxShadow: "0 -4px 12px rgba(0,0,0,0.4)",
+        zIndex: 100, display: "flex", flexDirection: "column", gap: "8px"
+      }}>
+        {/* Banner preventivo de goles inusuales */}
+        {alertaInusual && (
+          <div style={{
+            backgroundColor: "#7c2d12", color: "#fdba74", padding: "10px", borderRadius: "6px",
+            border: "1px solid #ea580c", fontSize: "12px", fontWeight: "bold", textAlign: "center"
+          }}>
+            {alertaInusual}
+          </div>
+        )}
+
+        {/* LEYENDA DE ÉXITO O ERROR: Siempre visible al lado o arriba del botón */}
+        {mensaje && (
+          <div style={{
+            backgroundColor: "#1a1a2e", padding: "10px", borderRadius: "6px",
+            borderLeft: "4px solid " + (mensaje.includes("✅") ? "#4caf50" : "#e94560"),
+            fontSize: "13px", color: "#ccc", textAlign: "center", fontWeight: "500"
+          }}>
+            {mensaje}
+          </div>
+        )}
+
+        {jornada.estado === "abierta" && !usuarioDeshabilitado && (
+          <button
+            onClick={guardar}
+            disabled={guardando}
+            style={{
+              width: "100%", padding: "14px", 
+              backgroundColor: bloqueoPreventivo ? "#ea580c" : "#e94560",
+              color: "#fff", border: "none", borderRadius: "8px",
+              fontSize: "15px", fontWeight: "bold", cursor: guardando ? "not-allowed" : "pointer",
+              boxShadow: bloqueoPreventivo ? "0 4px 10px rgba(234, 88, 12, 0.3)" : "0 4px 10px rgba(233, 69, 96, 0.3)"
+            }}
+          >
+            {guardando ? "Guardando Quiniela..." : bloqueoPreventivo ? "⚠️ Confirmar: Guardar Marcador Inusual Extremo" : "💾 Guardar mi quiniela"}
+          </button>
         )}
       </div>
     </div>
@@ -318,3 +396,4 @@ const golesInput: React.CSSProperties = {
   width: "56px", padding: "8px", textAlign: "center",
   borderRadius: "8px", fontSize: "16px", fontWeight: "bold"
 };
+  

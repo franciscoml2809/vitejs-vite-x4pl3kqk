@@ -15,14 +15,31 @@ interface Props {
 
 const ADMIN_EMAIL = "francisco.ml2809@gmail.com";
 
+// INCREMENTA ESTA CADENA CADENA CADA VEZ QUE SUBAS ACTUALIZACIONES CRÍTICAS
+const VERSION_CODIGO = "1.0.1";
 export default function Dashboard({ user }: Props) {
   const [seccion, setSeccion] = useState<"jornadas" | "tabla">("jornadas");
   const [enAdmin, setEnAdmin] = useState(false);
 
+  // Efecto prioritario: Blindaje contra el almacenamiento persistente en navegadores móviles
+  useEffect(() => {
+    const versionDetectada = localStorage.getItem("quiniela_build_ver");
+    
+    if (versionDetectada !== VERSION_CODIGO) {
+      localStorage.setItem("quiniela_build_ver", VERSION_CODIGO);
+      
+      // Vaciado seguro de almacenamiento temporal para forzar descarga limpia del nuevo código
+      localStorage.removeItem("jornadas_cache");
+      sessionStorage.clear();
+      
+      // Dispara un refresco inmediato de la ventana desde el servidor remoto
+      window.location.reload();
+    }
+  }, []);
+
   useEffect(() => {
     const guardarUsuario = async () => {
       try {
-        // Registro y actualización estática y automática del perfil del amigo al iniciar sesión
         await setDoc(doc(db, "usuarios", user.uid), {
           uid: user.uid,
           nombre: user.displayName || user.email,
@@ -43,11 +60,9 @@ export default function Dashboard({ user }: Props) {
     }
   };
 
-  // Ruteo condicional puro hacia el Panel Maestro de Administración
   if (enAdmin) {
     return <Admin user={user} onBack={() => setEnAdmin(false)} />;
   }
-
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
 

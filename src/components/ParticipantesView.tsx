@@ -17,9 +17,18 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
   const [nombreTorneoReporte, setNombreTorneoReporte] = useState("Desconocido");
   const [nombreLigaReporte, setNombreLigaReporte] = useState("Desconocida");
 
+  // Estado nuevo para controlar el universo total de partidos activos en la fecha
+  const [totalPartidosJornada, setTotalPartidosJornada] = useState<number>(0);
+
   useEffect(() => {
     const inicializar = async () => {
       try {
+        // 1. Obtener y filtrar partidos oficiales no suspendidos de la jornada
+        const partidosSnap = await getDocs(collection(db, "jornadas", jornada.id, "partidos"));
+        const listaPartidosActivos = partidosSnap.docs.filter(d => !d.data().suspendido);
+        setTotalPartidosJornada(listaPartidosActivos.length);
+
+        // 2. Mapear nombres reales del catálogo global de usuarios
         const uSnap = await getDocs(collection(db, "usuarios"));
         const temporalMap: { [uid: string]: string } = {};
         uSnap.docs.forEach(d => {
@@ -28,9 +37,41 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
         });
         setUsuariosMap(temporalMap);
 
+        // 3. Consultar subcolección de participantes admitidos en la fecha
         const pSnap = await getDocs(collection(db, "pronosticos", jornada.id, "participantes"));
-        const lista = pSnap.docs.map(d => ({ uid: d.id, ...d.data() }));
-        setParticipantes(lista);
+        const listaTemp = [];
+
+        for (const pDoc of pSnap.docs) {
+          const pData = pDoc.data();
+          const pUid = pDoc.id;
+
+          // Consulta interna asíncrona por cada participante para medir sus avances reales
+          const pronosticosSnap = await getDocs(
+            collection(db, "pronosticos", jornada.id, "participantes", pUid, "partidos")
+          );
+          
+          let conteoLlenados = 0;
+          pronosticosSnap.docs.forEach(pronoDoc => {
+            const pronoData = pronoDoc.data();
+            if (
+              pronoData.golesLocal !== "" && 
+              pronoData.golesVisitante !== "" && 
+              pronoData.golesLocal !== undefined && 
+              pronoData.golesVisitante !== undefined &&
+              pronoData.golesLocal !== "-" &&
+              pronoData.golesVisitante !== "-"
+            ) {
+              conteoLlenados++;
+            }
+          });
+
+          listaTemp.push({
+            uid: pUid,
+            ...pData,
+            partidosLlenados: conteoLlenados
+          });
+        }
+        setParticipantes(listaTemp);
 
         const tSnap = await getDocs(collection(db, "torneos"));
         const lSnap = await getDocs(collection(db, "ligas"));
@@ -51,6 +92,33 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
     inicializar();
   }, []);
 
+  // Generador de alias inteligentes de 3 caracteres al vuelo
+  const obtenerAlias = (nombre: string): string => {
+    if (!nombre) return "???";
+    const limpio = nombre.trim().toUpperCase();
+    
+    // Diccionario de correcciones comunes de equipos de la Liga MX
+    if (limpio.indexOf("CRUZ") !== -1 || limpio.indexOf("AZUL") !== -1) return "CAZ";
+    if (limpio.indexOf("PUMA") !== -1 || limpio.indexOf("UNAM") !== -1) return "UNM";
+    if (limpio.indexOf("AMER") !== -1) return "AME";
+    if (limpio.indexOf("CHIV") !== -1 || limpio.indexOf("GUAD") !== -1) return "GUA";
+    if (limpio.indexOf("TIG") !== -1) return "TIG";
+    if (limpio.indexOf("RAYA") !== -1 || limpio.indexOf("MONT") !== -1) return "MTY";
+    if (limpio.indexOf("ATLAS") !== -1) return "ATS";
+    if (limpio.indexOf("SAN LUIS") !== -1) return "ASL";
+    if (limpio.indexOf("JUAR") !== -1 || limpio.indexOf("BRAV") !== -1) return "JUA";
+    if (limpio.indexOf("TIJU") !== -1 || limpio.indexOf("XOLO") !== -1) return "TIJ";
+    if (limpio.indexOf("QUER") !== -1 || limpio.indexOf("GALL") !== -1) return "QRO";
+    if (limpio.indexOf("ATLAN") !== -1) return "ATL";
+    if (limpio.indexOf("NECA") !== -1) return "NEC";
+    if (limpio.indexOf("PACH") !== -1) return "PAC";
+    if (limpio.indexOf("TOLU") !== -1) return "TOL";
+    if (limpio.indexOf("PUEB") !== -1) return "PUE";
+    if (limpio.indexOf("LEON") !== -1) return "LEO";
+    if (limpio.indexOf("SANT") !== -1) return "SAN";
+    
+    return limpio.substring(0, 3);
+  };
   const exportarTexto = async () => {
     const habilitadosParaReporte = participantes.filter(p => p.deshabilitado !== true);
 
@@ -68,25 +136,41 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
         .filter((p: any) => !p.suspendido)
         .sort((a: any, b: any) => (a.fechaHora < b.fechaHora ? -1 : 1));
 
-      let txt = "==================================================\n";
-      txt += "        REPORTE OFICIAL DE PRONÓSTICOS\n";
-      txt += "==================================================\n";
+      // 1. Crear el bloque dinámico de encabezados de los partidos alineados (7 caracteres por columna)
+      let filaPartidosHeader = "";
+      listaPartidos.forEach((partido: any) => {
+        const aliasLocal = obtenerAlias(partido.local);
+        const aliasVisitante = obtenerAlias(partido.visitante);
+        const llavePartido = aliasLocal + "-" + aliasVisitante;
+        filaPartidosHeader = filaPartidosHeader + " | " + llavePartido.padEnd(7, " ");
+      });
+
+      // 2. Determinar la longitud de la línea divisoria basado en los partidos que haya
+      const columnaNombreWidth = 18;
+      let totalSeparadores = columnaNombreWidth;
+      listaPartidos.forEach(() => {
+        totalSeparadores = totalSeparadores + 10; // Espaciado simétrico de cada pipe y datos
+      });
+      
+      let lineaDivisoria = "".padEnd(totalSeparadores, "-") + "\n";
+
+      // 3. Compilar el encabezado estático del reporte general
+      let txt = "======================================================================\n";
+      txt += "        REPORTE OFICIAL DE PRONÓSTICOS — COMPARACIÓN DIRECTA\n";
+      txt += "======================================================================\n";
       txt += "Liga Base: " + nombreLigaReporte + "\n";
       txt += "Torneo Edición: " + nombreTorneoReporte + "\n";
       txt += "Jornada: " + jornada.numero + "\n";
       txt += "Estado General: " + jornada.estado.toUpperCase() + "\n";
-      txt += "Total Participantes Habilitados: " + habilitadosParaReporte.length + "\n";
-      txt += "==================================================\n\n";
+      txt += "======================================================================\n";
+      txt += "Participante      " + filaPartidosHeader + "\n";
+      txt += lineaDivisoria;
 
+      // 4. Bucle asíncrono cruzado para inyectar las filas de los participantes
       for (const p of habilitadosParaReporte) {
         const nombreAmigo = usuariosMap[p.uid] || p.uid;
-        const estatusPago = p.pagoRealizado === true ? " [PAGADO]" : " [PAGO PENDIENTE]";
+        const colNombre = nombreAmigo.substring(0, columnaNombreWidth).padEnd(columnaNombreWidth, " ");
         
-        txt += "--------------------------------------------------\n";
-        txt += "PARTICIPANTE: " + nombreAmigo + estatusPago + "\n";
-        txt += "Estado en Jornada: HABILITADO\n";
-        txt += "--------------------------------------------------\n";
-
         const pronosticosSnap = await getDocs(
           collection(db, "pronosticos", jornada.id, "participantes", p.uid, "partidos")
         );
@@ -95,20 +179,34 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
           proMap[d.id] = d.data();
         });
 
-        // PARCHADO DE NETLIFY: Forzado de tipo explícito (partido: any) para dar paso libre a las propiedades
+        let filaPronosticosCeldas = "";
         for (const partido of listaPartidos as any[]) {
           const proGuardado = proMap[partido.id];
-          if (proGuardado) {
-            txt += partido.local + " ( " + proGuardado.golesLocal + " ) vs ( " + proGuardado.golesVisitante + " ) " + partido.visitante + "\n";
-          } else {
-            txt += partido.local + " ( Sin registro ) vs ( Sin registro ) " + partido.visitante + "\n";
+          let celdaResultado = "  ?  "; // Valor por defecto si no hay registro
+          
+          if (
+            proGuardado && 
+            proGuardado.golesLocal !== "" && 
+            proGuardado.golesVisitante !== "" && 
+            proGuardado.golesLocal !== "-" && 
+            proGuardado.golesVisitante !== "-" &&
+            proGuardado.golesLocal !== undefined &&
+            proGuardado.golesVisitante !== undefined
+          ) {
+            const golesL = proGuardado.golesLocal;
+            const golesV = proGuardado.golesVisitante;
+            celdaResultado = " " + golesL + "-" + golesV + " ";
           }
+          
+          filaPronosticosCeldas = filaPronosticosCeldas + " | " + celdaResultado.padEnd(7, " ");
         }
-        txt += "\n";
+
+        txt += colNombre + filaPronosticosCeldas + "\n";
       }
 
-      txt += "==================================================\n";
-      txt += "Generado automáticamente por el Sistema de Quinielas.\n";
+      txt += lineaDivisoria;
+      txt += "Generado automáticamente por el Sistema de Quinielas. Total: " + habilitadosParaReporte.length + " Amigos\n";
+      txt += "======================================================================\n";
 
       const blob = new Blob([txt], { type: "text/plain;charset=utf-8" });
       const urlDescarga = URL.createObjectURL(blob);
@@ -120,13 +218,14 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
       document.body.removeChild(enlaceHtml);
       URL.revokeObjectURL(urlDescarga);
 
-      setMensaje("✅ Archivo .txt descargado exitosamente");
+      setMensaje("✅ Reporte .txt descargado exitosamente");
     } catch (e) {
       console.error(e);
-      setMensaje("❌ Error al icodificar el reporte de exportación");
+      setMensaje("❌ Error al codificar el reporte de exportación");
     }
     setExportando(false);
   };
+
   const toggleHabilitar = async (pId: string, estadoActual: boolean) => {
     setMensaje("");
     try {
@@ -140,7 +239,6 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
       setMensaje("❌ Error al cambiar los permisos del participante en Firestore");
     }
   };
-
   const togglePago = async (pId: string, pagoActual: boolean) => {
     setMensaje("");
     try {
@@ -196,6 +294,11 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
               const estaDeshabilitado = p.deshabilitado === true;
               const tienePago = p.pagoRealizado === true;
 
+              // Constantes de validación semántica sobre los avances del amigo
+              const conteoLlenados = p.partidosLlenados || 0;
+              const tieneTodoListo = conteoLlenados === totalPartidosJornada && totalPartidosJornada > 0;
+              const noTieneNinguno = conteoLlenados === 0;
+
               return (
                 <div key={p.uid} style={{
                   backgroundColor: estaDeshabilitado ? "#2a1a1a" : tienePago ? "#102a18" : "#16213e", 
@@ -217,8 +320,24 @@ export default function ParticipantesView({ jornada, onBack }: ParticipantesView
                     }}>
                       {usuariosMap[p.uid] || p.uid}
                     </div>
-                    <div style={{ color: "#888", fontSize: "11px", marginTop: "2px" }}>
-                      {estaDeshabilitado ? "🚫 Deshabilitado (Fuera de juego)" : tienePago ? "💰 Cuota Recibida (Ok)" : "⏳ Pago Pendiente"}
+                    
+                    {/* MONITOR VISUAL INTEGRADO DE LLEVADO DE PARTIDOS EN LA SUB-LEYENDA */}
+                    <div style={{ marginTop: "2px" }}>
+                      {estaDeshabilitado ? (
+                        <div style={{ color: "#888", fontSize: "11px" }}>🚫 Deshabilitado (Fuera de juego)</div>
+                      ) : noTieneNinguno ? (
+                        <div style={{ color: "#f87171", fontSize: "11px", fontWeight: "bold" }}>
+                          🚨 Sin pronósticos (0 de {totalPartidosJornada})
+                        </div>
+                      ) : tieneTodoListo ? (
+                        <div style={{ color: "#34d399", fontSize: "11px", fontWeight: "bold" }}>
+                          ✅ Listo ({conteoLlenados} de {totalPartidosJornada})
+                        </div>
+                      ) : (
+                        <div style={{ color: "#fbbf24", fontSize: "11px", fontWeight: "bold" }}>
+                          ⚠️ Incompleto: Solo lleva {conteoLlenados} de {totalPartidosJornada}
+                        </div>
+                      )}
                     </div>
                   </div>
 

@@ -73,7 +73,7 @@ export default function Jornadas({ user }: Props) {
     const path = window.location.pathname;
     const match = path.match(/\/jornada\/(.+)/);
     if (match && jornadas.length > 0) {
-      const jornadaId = match[1];
+      const jornadaId = match;
       const encontrada = jornadas.find((j: any) => j.id === jornadaId);
       if (encontrada) setJornadaActiva(encontrada);
     }
@@ -209,7 +209,7 @@ export default function Jornadas({ user }: Props) {
               No hay jornadas finalizadas en el historial todavía.
             </div>
           ) : (
-            jornadasFinalizadas.map((jornada) => {
+            jornadasFinalizadas.map((jornada: any) => {
               const torneoAsociado = torneos.find(t => t.id === jornada.torneoId);
               const ligaAsociada = torneoAsociado ? ligas.find(l => l.id === torneoAsociado.ligaId) : null;
   

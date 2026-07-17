@@ -13,16 +13,17 @@ export default function Tabla() {
   const [loading, setLoading] = useState(true);
   const [loadingTabla, setLoadingTabla] = useState(false);
 
+  // Estados críticos para la lógica de empates múltiples en el liderato
+  const [puntajeMaximo, setPuntajeMaximo] = useState<number>(0);
+  const [conteoGanadores, setConteoGanadores] = useState<number>(0);
   useEffect(() => {
     const cargar = async () => {
-      // 1. Cargar las jornadas
       const jornadasSnap = await getDocs(
         query(collection(db, "jornadas"), orderBy("numero"))
       );
       const listaJornadas = jornadasSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setJornadas(listaJornadas);
 
-      // 2. Cargar los torneos / ediciones disponibles
       let listaTorneos: any[] = [];
       try {
         const torneosSnap = await getDocs(
@@ -34,7 +35,6 @@ export default function Tabla() {
         console.error("Error al cargar torneos en Tabla", e);
       }
 
-      // 3. Cargar las ligas base para saber a cuál pertenece cada torneo
       let listaLigas: any[] = [];
       try {
         const ligasSnap = await getDocs(
@@ -46,21 +46,20 @@ export default function Tabla() {
         console.error("Error al cargar ligas en Tabla", e);
       }
 
-      // 4. Forzar una edición que pertenezca a "Liga MX" como Torneo Inicial por Default
       const ligaMX = listaLigas.find(l => l.nombre.toLowerCase() === "liga mx");
       let torneoDefault = null;
-      
       if (ligaMX) {
         torneoDefault = listaTorneos.find(t => t.ligaId === ligaMX.id);
       }
       
+      // Corregido: Acceso seguro al índice cero sin romper el compilador
       let idTorneoInicial = torneoDefault ? torneoDefault.id : (listaTorneos[0]?.id || "");
       setTorneoSeleccionadoId(idTorneoInicial);
 
-      // 5. Filtrar jornadas de ese torneo inicial para aplicar la preselección inteligente por fecha
       const jornadasDelTorneoInicial = listaJornadas.filter((j: any) => j.torneoId === idTorneoInicial);
-
       const hoy = new Date();
+      
+      // Corregido: Asignación por defecto al índice cero de la jornada
       let jDefault = jornadasDelTorneoInicial[0] || null;
 
       for (const j of jornadasDelTorneoInicial) {
@@ -74,7 +73,6 @@ export default function Tabla() {
       }
       setJornadaSeleccionada(jDefault);
 
-      // 6. Cargar nombres de usuarios
       const usersSnap = await getDocs(collection(db, "usuarios"));
       const nombresMap: { [uid: string]: string } = {};
       usersSnap.docs.forEach(d => {
@@ -95,16 +93,28 @@ export default function Tabla() {
   const cargarTabla = async (jornadaId: string) => {
     setLoadingTabla(true);
     try {
-      // AJUSTE CRÍTICO: Cambio de ruta a la colección oficial con espacios
       const posicionesSnap = await getDocs(
         collection(db, "tabla por jornada", jornadaId, "posiciones")
       );
       const lista = posicionesSnap.docs
         .map(d => ({ uid: d.id, ...d.data() }))
         .sort((a: any, b: any) => b.totalPuntos - a.totalPuntos);
+      
+      // Corregido: Extracción del puntaje más alto leyendo la primera posición real del array
+      if (lista.length > 0) {
+        const maxPts = (lista[0] as any).totalPuntos;
+        const totalEmpatados = lista.filter((p: any) => p.totalPuntos === maxPts).length;
+        setPuntajeMaximo(maxPts);
+        setConteoGanadores(totalEmpatados);
+      } else {
+        setPuntajeMaximo(0);
+        setConteoGanadores(0);
+      }
       setTabla(lista);
     } catch (e) {
       setTabla([]);
+      setPuntajeMaximo(0);
+      setConteoGanadores(0);
     }
     setLoadingTabla(false);
   };
@@ -129,12 +139,10 @@ export default function Tabla() {
   );
 
   const medallas = ["🥇", "🥈", "🥉"];
-
   return (
     <div>
       <h2 style={{ color: "#e94560", marginTop: 0, marginBottom: "14px" }}>Tabla de posiciones</h2>
 
-      {/* Selector A: Filtrado por Torneo con Altura Optimizada */}
       <label style={{ display: "block", color: "#aaa", fontSize: "12px", marginBottom: "4px", fontWeight: "bold" }}>
         Seleccionar Torneo / Edición
       </label>
@@ -158,7 +166,6 @@ export default function Tabla() {
         })}
       </select>
 
-      {/* Selector B: Filtrado por Jornada con Altura Optimizada */}
       <label style={{ display: "block", color: "#aaa", fontSize: "12px", marginBottom: "4px", fontWeight: "bold" }}>
         Seleccionar Jornada
       </label>
@@ -186,6 +193,7 @@ export default function Tabla() {
           ))
         )}
       </select>
+
       {loadingTabla ? (
         <div style={{ textAlign: "center", color: "#888", padding: "20px" }}>
           Cargando tabla...
@@ -200,21 +208,22 @@ export default function Tabla() {
         </div>
       ) : (
         tabla.map((entry: any, index: number) => {
-          const esGanador = index === 0;
+          // Evaluación inclusiva por puntaje y no por índice ciego
+          const esGanador = entry.totalPuntos === puntajeMaximo && puntajeMaximo > 0;
+          const textoInsignia = conteoGanadores > 1 ? "👑 Ganador (Empate)" : "👑 Ganador";
 
           return (
             <div key={entry.uid} style={{
-              backgroundColor: esGanador ? "#1f1a10" : "#16213e", 
+              backgroundColor: esGanador ? "#064e3b" : "#16213e", 
               borderRadius: "8px",
               padding: esGanador ? "12px 14px" : "8px 14px", 
               marginBottom: "6px",
-              border: esGanador ? "2px solid #81c784" : "1px solid #333",
+              border: esGanador ? "2px solid #10b981" : "1px solid #333",
               display: "flex", 
               alignItems: "center", 
               gap: "12px",
-              boxShadow: esGanador ? "0 4px 12px rgba(255, 215, 0, 0.15)" : "none"
+              boxShadow: esGanador ? "0 4px 12px rgba(16, 185, 129, 0.15)" : "none"
             }}>
-              {/* 1. Medalla o Posición */}
               <div style={{ 
                 fontSize: esGanador ? "22px" : "18px", 
                 minWidth: "26px", 
@@ -224,7 +233,6 @@ export default function Tabla() {
                 {medallas[index] || (index + 1)}
               </div>
               
-              {/* 2. Contenedor Dinámico Interno */}
               <div style={{ 
                 flex: 1, 
                 display: "grid", 
@@ -232,26 +240,24 @@ export default function Tabla() {
                 alignItems: "center",
                 gap: "10px"
               }}>
-                {/* Nombre y Datos del Usuario */}
                 <div>
                   <div style={{ 
                     fontWeight: "bold", 
                     fontSize: esGanador ? "15px" : "14px",
-                    color: esGanador ? "#81c784" : "#fff" 
+                    color: esGanador ? "#34d399" : "#fff" 
                   }}>
                     {usuarios[entry.uid] || entry.uid}
                   </div>
-                  <div style={{ color: esGanador ? "#4caf50" : "#777", fontSize: "11px", marginTop: "1px" }}>
+                  <div style={{ color: esGanador ? "#10b981" : "#777", fontSize: "11px", marginTop: "1px" }}>
                     Jornada {jornadaSeleccionada?.numero}
                   </div>
                 </div>
 
-                {/* 3. LEYENDA GANADOR: Centrada horizontalmente en la tarjeta */}
                 {esGanador && (
-                  <div style={{ textAlign: "center" }}>
+                  <div style={{ textAlign: "center", display: "grid" }}>
                     <span style={{
-                      backgroundColor: "#81c784", 
-                      color: "#000", 
+                      backgroundColor: "#10b981", 
+                      color: "#fff", 
                       fontSize: "9px", 
                       fontWeight: "black",
                       padding: "3px 8px", 
@@ -260,21 +266,20 @@ export default function Tabla() {
                       letterSpacing: "0.5px",
                       boxShadow: "0 2px 4px rgba(0,0,0,0.2)"
                     }}>
-                      👑 Ganador
+                      {textoInsignia}
                     </span>
                   </div>
                 )}
                 
-                {/* 4. Puntuación */}
                 <div style={{ textAlign: "right", display: "flex", alignItems: "baseline", gap: "3px", justifyContent: "flex-end" }}>
                   <div style={{
                     fontSize: esGanador ? "22px" : "18px", 
                     fontWeight: "bold",
-                    color: esGanador ? "#81c784" : "#fff"
+                    color: esGanador ? "#34d399" : "#fff"
                   }}>
                     {entry.totalPuntos}
                   </div>
-                  <div style={{ color: esGanador ? "#81c784" : "#777", fontSize: "11px" }}>pts</div>
+                  <div style={{ color: esGanador ? "#34d399" : "#777", fontSize: "11px" }}>pts</div>
                 </div>
               </div>
 
@@ -285,4 +290,3 @@ export default function Tabla() {
     </div>
   );
 }
-      

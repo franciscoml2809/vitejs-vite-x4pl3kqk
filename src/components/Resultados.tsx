@@ -16,12 +16,14 @@ export default function Resultados({ jornada, onBack }: Props) {
   const [calculando, setCalculando] = useState(false);
   const [mensaje, setMensaje] = useState("");
 
+  // Estados críticos para el blindaje de captura segura (anti error de dedo)
+  const [alertaInusual, setAlertaInusual] = useState("");
+  const [bloqueoPreventivo, setBloqueoPreventivo] = useState(false);
   useEffect(() => {
     const cargar = async () => {
       const snap = await getDocs(
         collection(db, "jornadas", jornada.id, "partidos")
       );
-      // Solo partidos NO suspendidos
       const lista = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .filter((p: any) => !p.suspendido);
@@ -54,11 +56,35 @@ export default function Resultados({ jornada, onBack }: Props) {
     if (getResultado(pronosticoL, pronosticoV) === getResultado(realL, realV)) return 1;
     return 0;
   };
+
   const guardarYCalcular = async () => {
+    // Escaneo preventivo de marcadores en los inputs del formulario antes de procesar
+    let mayorGolesDetectado = 0;
+    
+    for (const partido of partidos) {
+      const r = resultados[partido.id];
+      if (!r || r.local === "" || r.visitante === "") continue;
+      
+      const gl = parseInt(r.local);
+      const gv = parseInt(r.visitante);
+      
+      if (gl > 6 && gl > mayorGolesDetectado) mayorGolesDetectado = gl;
+      if (gv > 6 && gv > mayorGolesDetectado) mayorGolesDetectado = gv;
+    }
+
+    // Detener flujo si excede 6 goles y no se ha confirmado la excepción histórica
+    if (mayorGolesDetectado > 6 && !bloqueoPreventivo) {
+      setAlertaInusual("⚠️ Alerta: Detectamos un marcador inusual de " + mayorGolesDetectado + " goles. Por favor verifica los datos antes de actualizar el ranking en vivo.");
+      setBloqueoPreventivo(true);
+      return;
+    }
+
     setCalculando(true);
     setMensaje("");
+    setAlertaInusual("");
+    setBloqueoPreventivo(false);
+
     try {
-      // 1. Guardar resultados reales en cada partido de la jornada en Firestore
       for (const partido of partidos) {
         const r = resultados[partido.id];
         if (!r || r.local === "" || r.visitante === "") continue;
@@ -71,7 +97,6 @@ export default function Resultados({ jornada, onBack }: Props) {
         });
       }
 
-      // 2. Volver a leer la subcolección de partidos de la jornada para obtener la foto real y fresca de Firestore
       const partidosActualizadosSnap = await getDocs(
         collection(db, "jornadas", jornada.id, "partidos")
       );
@@ -80,7 +105,6 @@ export default function Resultados({ jornada, onBack }: Props) {
         partidosOficialesMap[d.id] = d.data();
       });
 
-      // 3. CONSULTA JERÁRQUICA: Recorrer participantes directo de la subcolección de esta jornada
       const participantesSnap = await getDocs(
         collection(db, "pronosticos", jornada.id, "participantes")
       );
@@ -90,7 +114,6 @@ export default function Resultados({ jornada, onBack }: Props) {
         const uid = participanteDoc.id;
         const participanteData = participanteDoc.data();
 
-        // Excluir automáticamente a los amigos penalizados/deshabilitados por el administrador
         if (participanteData.deshabilitado === true) continue;
 
         const partidosSnap = await getDocs(
@@ -105,7 +128,6 @@ export default function Resultados({ jornada, onBack }: Props) {
           const pro = proDoc.data();
           const partidoId = proDoc.id;
 
-          // LEER DESDE FIRESTORE (No de los inputs): Si el partido aún no se juega o no tiene marcador oficial, saltar sin borrar el pasado
           const partidoOficial = partidosOficialesMap[partidoId];
           if (!partidoOficial || partidoOficial.suspendido) continue;
           if (partidoOficial.golesLocal === null || partidoOficial.golesVisitante === null) continue;
@@ -126,7 +148,6 @@ export default function Resultados({ jornada, onBack }: Props) {
         puntajesPorUsuario[uid] = totalUsuario;
       }
 
-      // 4. Escribir los puntajes consolidados en la colección oficial de posiciones con espacios
       for (const [uid, puntos] of Object.entries(puntajesPorUsuario)) {
         await setDoc(
           doc(db, "tabla por jornada", jornada.id, "posiciones", uid),
@@ -170,6 +191,23 @@ export default function Resultados({ jornada, onBack }: Props) {
       </div>
 
       <div style={{ padding: "20px" }}>
+        {/* Banner preventivo de validación en color amarillo/naranja */}
+        {alertaInusual && (
+          <div style={{ 
+            backgroundColor: "#7c2d12", 
+            color: "#fdba74", 
+            padding: "12px", 
+            borderRadius: "8px", 
+            marginBottom: "16px", 
+            fontSize: "13px", 
+            border: "1px solid #ea580c",
+            fontWeight: "bold",
+            textAlign: "center"
+          }}>
+            {alertaInusual}
+          </div>
+        )}
+
         {partidos.length === 0 ? (
           <div style={{
             backgroundColor: "#16213e", borderRadius: "12px",
@@ -200,10 +238,14 @@ export default function Resultados({ jornada, onBack }: Props) {
                       min="0"
                       placeholder="0"
                       value={resultados[partido.id]?.local || ""}
-                      onChange={(e) => setResultados(prev => ({
-                        ...prev,
-                        [partido.id]: { ...prev[partido.id], local: e.target.value }
-                      }))}
+                      onChange={(e) => {
+                        setAlertaInusual("");
+                        setBloqueoPreventivo(false);
+                        setResultados(prev => ({
+                          ...prev,
+                          [partido.id]: { ...prev[partido.id], local: e.target.value }
+                        }));
+                      }}
                       style={golesInput}
                     />
                   </div>
@@ -219,10 +261,14 @@ export default function Resultados({ jornada, onBack }: Props) {
                       min="0"
                       placeholder="0"
                       value={resultados[partido.id]?.visitante || ""}
-                      onChange={(e) => setResultados(prev => ({
-                        ...prev,
-                        [partido.id]: { ...prev[partido.id], visitante: e.target.value }
-                      }))}
+                      onChange={(e) => {
+                        setAlertaInusual("");
+                        setBloqueoPreventivo(false);
+                        setResultados(prev => ({
+                          ...prev,
+                          [partido.id]: { ...prev[partido.id], visitante: e.target.value }
+                        }));
+                      }}
                       style={golesInput}
                     />
                   </div>
@@ -242,16 +288,22 @@ export default function Resultados({ jornada, onBack }: Props) {
           onClick={guardarYCalcular}
           disabled={calculando}
           style={{
-            width: "100%", padding: "14px", backgroundColor: "#e94560",
-            color: "#fff", border: "none", borderRadius: "8px",
-            fontSize: "16px", fontWeight: "bold", cursor: "pointer",
-            marginTop: "12px", boxShadow: "0 4px 12px rgba(233,69,96,0.2)"
+            width: "100%", 
+            padding: "14px", 
+            backgroundColor: bloqueoPreventivo ? "#ea580c" : "#e94560",
+            color: "#fff", 
+            border: "none", 
+            borderRadius: "8px",
+            fontSize: "16px", 
+            fontWeight: "bold", 
+            cursor: calculando ? "not-allowed" : "pointer",
+            marginTop: "12px", 
+            boxShadow: bloqueoPreventivo ? "0 4px 12px rgba(234,88,12,0.2)" : "0 4px 12px rgba(233,69,96,0.2)"
           }}
         >
-          {calculando ? "Calculando..." : "⚡ Guardar marcadores y actualizar ranking en vivo"}
+          {calculando ? "Calculando..." : bloqueoPreventivo ? "⚠️ Confirmar: Registrar Marcador Histórico Extremo" : "⚡ Guardar marcadores y actualizar ranking en vivo"}
         </button>
 
-        {/* ETIQUETA INFORMATIVA COMPACTA NEUTRAL DEL ESTADO DE LA JORNADA */}
         <div style={{
           marginTop: "12px", padding: "12px", borderRadius: "8px",
           backgroundColor: "#12192c", border: "1px solid #222",

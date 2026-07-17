@@ -36,9 +36,29 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
         const partido = partidos[pro.partidoId];
         // Omitir por completo el conteo de partidos suspendidos
         if (partido?.suspendido) return null;
-        total += pro.puntos || 0;
-        return { ...pro, partido };
-      }).filter(Boolean);
+
+        // Comprobación defensiva local: si el admin no ha puesto marcadores, es un partido pendiente
+        const tieneMarcadorOficial = partido?.golesLocal !== null && partido?.golesLocal !== undefined &&
+                                    partido?.golesVisitante !== null && partido?.golesVisitante !== undefined;
+
+        // Si tiene marcador usamos sus puntos, si no, usamos la bandera (-1) para pintar gris en la UI
+        const puntosVista = tieneMarcadorOficial ? (pro.puntos || 0) : -1;
+
+        if (tieneMarcadorOficial) {
+          total += pro.puntos || 0;
+        }
+
+        return { ...pro, partido, puntosVista };
+      })
+      .filter(Boolean)
+      // Ordenación precisa usando el string fechaHora nativo guardado por el administrador
+      .sort((a, b) => {
+        const fA = a.partido?.fechaHora || "";
+        const fB = b.partido?.fechaHora || "";
+        if (fA < fB) return -1;
+        if (fA > fB) return 1;
+        return 0;
+      });
 
       setDatos(lista);
       setTotalPuntos(total);
@@ -47,15 +67,18 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
     cargar();
   }, []);
 
-  const getColor = (puntos: number) => {
-    if (puntos === 3) return "#4caf50";
-    if (puntos === 1) return "#ff9800";
-    return "#e94560";
+  // Control estético de colores: Gris neutral si está pendiente (-1)
+  const getColor = (puntosVista: number) => {
+    if (puntosVista === -1) return "#555566"; // Gris oscuro neutral
+    if (puntosVista === 3) return "#4caf50";   // Verde exacto
+    if (puntosVista === 1) return "#ff9800";   // Naranja tendencia
+    return "#e94560";                          // Rojo fallado
   };
 
-  const getIcono = (puntos: number) => {
-    if (puntos === 3) return "⭐";
-    if (puntos === 1) return "✅";
+  const getIcono = (puntosVista: number) => {
+    if (puntosVista === -1) return "🕒";        // Icono de espera para pendientes
+    if (puntosVista === 3) return "⭐";
+    if (puntosVista === 1) return "✅";
     return "❌";
   };
 
@@ -64,7 +87,6 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
       Cargando puntos de la jornada...
     </div>
   );
-
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#1a1a2e", color: "#fff" }}>
       {/* Barra de Encabezado */}
@@ -91,7 +113,7 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
       </div>
 
       <div style={{ padding: "16px" }}>
-        {/* Bloque de Resumen Compacto Modificado */}
+        {/* Bloque de Resumen Compacto */}
         <div style={{
           backgroundColor: "#16213e", borderRadius: "12px",
           padding: "16px", marginBottom: "16px", textAlign: "center",
@@ -107,16 +129,16 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: "18px", marginBottom: "2px" }}>⭐</div>
               <div style={{ color: "#ccc", fontWeight: "bold", fontSize: "14px" }}>
-                {datos.filter(d => d.puntos === 3).length}
+                {datos.filter(d => d.puntosVista === 3).length}
               </div>
               <div style={{ color: "#777", fontSize: "11px", marginTop: "2px" }}>Exactos</div>
             </div>
             
-            {/* Resultado (Antes Tendencia) */}
+            {/* Resultado */}
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: "18px", marginBottom: "2px" }}>✅</div>
               <div style={{ color: "#ccc", fontWeight: "bold", fontSize: "14px" }}>
-                {datos.filter(d => d.puntos === 1).length}
+                {datos.filter(d => d.puntosVista === 1).length}
               </div>
               <div style={{ color: "#777", fontSize: "11px", marginTop: "2px" }}>Resultado</div>
             </div>
@@ -125,13 +147,14 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
             <div style={{ textAlign: "center" }}>
               <div style={{ fontSize: "18px", marginBottom: "2px" }}>❌</div>
               <div style={{ color: "#ccc", fontWeight: "bold", fontSize: "14px" }}>
-                {datos.filter(d => d.puntos === 0).length}
+                {datos.filter(d => d.puntosVista === 0).length}
               </div>
               <div style={{ color: "#777", fontSize: "11px", marginTop: "2px" }}>Fallados</div>
             </div>
           </div>
         </div>
-        {/* Listado de Confrontaciones Detallado con Etiquetas Claras */}
+
+        {/* Listado de Confrontaciones Detallado Optimizado para Móvil */}
         {datos.length === 0 ? (
           <div style={{
             backgroundColor: "#16213e", borderRadius: "12px",
@@ -140,66 +163,92 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
             <p>No registraste quiniela para esta fecha.</p>
           </div>
         ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {datos.map((item, index) => (
               <div key={index} style={{
-                backgroundColor: "#16213e", borderRadius: "10px",
-                padding: "10px 14px",
-                border: "1px solid " + getColor(item.puntos),
-                display: "grid",
-                gridTemplateColumns: "1.2fr 1.2fr 1.2fr auto",
+                backgroundColor: "#16213e", 
+                borderRadius: "10px",
+                padding: "12px 14px",
+                border: "1px solid " + getColor(item.puntosVista),
+                display: "flex",
+                justifyContent: "space-between",
                 alignItems: "center",
-                gap: "10px",
+                gap: "12px",
                 boxShadow: "0 2px 6px rgba(0,0,0,0.15)"
               }}>
-                {/* Columna 1: Equipo Local */}
-                <div style={{ textAlign: "right", fontWeight: "bold", fontSize: "14px", color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {item.partido?.local}
+                
+                {/* Contenedor Izquierdo Principal (Filas de Información) */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", flex: 1, minWidth: 0 }}>
+                  
+                  {/* Fila 1: Enfrentamiento (Equipo A vs Equipo B) */}
+                  <div style={{ 
+                    fontWeight: "bold", 
+                    fontSize: "14px", 
+                    color: "#fff", 
+                    whiteSpace: "nowrap", 
+                    overflow: "hidden", 
+                    textOverflow: "ellipsis" 
+                  }}>
+                    {(item.partido?.local ?? "Local")} <span style={{ color: "#888", fontWeight: "normal", fontSize: "12px" }}>vs</span> {(item.partido?.visitante ?? "Visitante")}
+                  </div>
+
+                  {/* Bloque Interno de Marcadores en Cascada */}
+                  <div style={{
+                    backgroundColor: "#12192c",
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid #253352",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px"
+                  }}>
+                    {/* Fila 2: Tu Pronóstico */}
+                    <div style={{ display: "flex", alignItems: "center", fontSize: "12px", gap: "6px" }}>
+                      <span style={{ color: "#aaa", minWidth: "75px" }}>Tu Prono:</span>
+                      <span style={{ color: "#fff", fontWeight: "bold" }}>
+                        {item.golesLocal} - {item.golesVisitante}
+                      </span>
+                    </div>
+
+                    {/* Fila 3: Resultado Oficial */}
+                    <div style={{ 
+                      display: "flex", 
+                      alignItems: "center", 
+                      fontSize: "12px", 
+                      gap: "6px",
+                      borderTop: "1px solid #1c2842", 
+                      paddingTop: "4px" 
+                    }}>
+                      <span style={{ color: "#aaa", minWidth: "75px" }}>Oficial:</span>
+                      <span style={{ color: getColor(item.puntosVista), fontWeight: "bold" }}>
+                        {(item.partido?.golesLocal ?? "?")} - {(item.partido?.golesVisitante ?? "?")}
+                      </span>
+                    </div>
+                  </div>
+
                 </div>
 
-                {/* Columna 2: Bloque de Confrontación de Marcadores (Doble Fila Vertical Limpia) */}
+                {/* Contenedor Derecho: Banner Lateral de Puntos Ganados */}
                 <div style={{ 
                   textAlign: "center", 
-                  backgroundColor: "#12192c", 
-                  padding: "6px 8px", 
-                  borderRadius: "6px", 
-                  border: "1px solid #253352",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "4px"
-                }}>
-                  {/* Fila del Pronóstico del Usuario */}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                    <span style={{ color: "#aaa" }}>Pronostico:</span>
-                    <span style={{ color: "#fff", fontWeight: "bold" }}>{item.golesLocal} - {item.golesVisitante}</span>
-                  </div>
-                  {/* Fila del Marcador Real Oficial */}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", borderTop: "1px solid #1c2842", paddingTop: "3px" }}>
-                    <span style={{ color: "#aaa" }}>Oficial:</span>
-                    <span style={{ color: getColor(item.puntos), fontWeight: "bold" }}>{item.partido?.golesLocal ?? "?"} - {item.partido?.golesVisitante ?? "?"}</span>
-                  </div>
-                </div>
-
-                {/* Columna 3: Equipo Visitante */}
-                <div style={{ textAlign: "left", fontWeight: "bold", fontSize: "14px", color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {item.partido?.visitante}
-                </div>
-
-                {/* Columna 4: Banner Lateral de Puntos Ganados sin fuentes cruzadas de color */}
-                <div style={{ 
-                  textAlign: "center", 
-                  backgroundColor: getColor(item.puntos) + "22", 
-                  border: "1px solid " + getColor(item.puntos),
-                  padding: "4px 8px",
+                  backgroundColor: getColor(item.puntosVista) + "22", 
+                  border: "1px solid " + getColor(item.puntosVista),
+                  padding: "6px 10px",
                   borderRadius: "6px",
                   fontSize: "13px", 
                   fontWeight: "bold", 
-                  color: "#ccc", // Texto e indicador numérico en color neutral claro
-                  minWidth: "68px",
-                  boxSizing: "border-box"
+                  color: "#ccc",
+                  minWidth: "72px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "4px",
+                  height: "fit-content"
                 }}>
-                  <span style={{ marginRight: "3px" }}>{getIcono(item.puntos)}</span> +{item.puntos}
+                  <span>{getIcono(item.puntosVista)}</span>
+                  <span>{item.puntosVista === -1 ? "—" : "+" + item.puntosVista}</span>
                 </div>
+
               </div>
             ))}
           </div>
@@ -208,3 +257,4 @@ export default function MisPuntos({ user, jornada, onBack }: Props) {
     </div>
   );
 }
+
